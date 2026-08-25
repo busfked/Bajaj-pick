@@ -1,0 +1,6 @@
+{
+  "name": "Bajaj Village Contract Dispatcher",
+  "description": "Local village Bajaj (tuk-tuk) registration and contract trip dispatch system with instant driver ringing, live KM map, direct passenger-driver connection, and registration fee management.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
