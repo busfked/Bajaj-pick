@@ -6,7 +6,8 @@ import {
   ContractTrip,
   VillageSettings,
   VillageDistrict,
-  DriverRegistrationForm
+  DriverRegistrationForm,
+  DriverRechargeRequest,
 } from './src/types';
 import {
   INITIAL_DRIVERS,
@@ -22,13 +23,14 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '15mb' }));
+  app.use(express.json({ limit: '25mb' }));
 
   // In-memory data store for the village network
   let settings: VillageSettings = { ...INITIAL_SETTINGS };
   let districts: VillageDistrict[] = [...DEFAULT_DISTRICTS];
   let drivers: BajajDriver[] = [...INITIAL_DRIVERS];
   let trips: ContractTrip[] = [];
+  let recharges: DriverRechargeRequest[] = [];
 
   // Helper to find online registered drivers within <= maxRangeKm (default 3.0 km) in active districts
   function findOnlineDriversWithinRange(
@@ -36,7 +38,9 @@ async function startServer() {
     districtId?: string,
     maxRangeKm = 3.0
   ): BajajDriver[] {
-    const onlineDrivers = drivers.filter(d => d.isOnline && d.isRegistered);
+    const onlineDrivers = drivers.filter(
+      d => d.isOnline && d.isRegistered && (d.approvalStatus === 'approved' || !d.approvalStatus)
+    );
     
     // Filter by district if specified and active, or by distance
     const nearby = onlineDrivers.filter(d => {
@@ -82,51 +86,211 @@ async function startServer() {
       districts,
       drivers,
       trips,
+      recharges,
       activeTrips: trips.filter(t => ['ringing', 'accepted', 'en_route', 'arrived'].includes(t.status)),
       completedTrips: trips.filter(t => t.status === 'completed'),
     });
   });
 
-  // Admin password check
+  // Admin authentication with Email & Phone only (No password required!)
+  app.post('/api/admin/verify-credentials', (req, res) => {
+    const { email, phone } = req.body;
+    const adminEmail = (settings.adminEmail || 'busfkedmurdu21@gmail.com').toLowerCase().trim();
+    const inputEmail = (email || '').toLowerCase().trim();
+    const inputPhone = (phone || '').trim();
+
+    // Check email match
+    if (inputEmail === adminEmail) {
+      if (inputPhone.length >= 8) {
+        // Save phone as admin contact if not set
+        if (!settings.adminPhone || settings.adminPhone === '0911234567') {
+          settings.adminPhone = inputPhone;
+        }
+        return res.json({
+          success: true,
+          authenticated: true,
+          message: 'Welcome back Admin! Access granted.',
+          admin: { email: adminEmail, phone: inputPhone }
+        });
+      }
+      return res.status(400).json({ success: false, error: 'Please provide your registered phone number.' });
+    }
+
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized: Admin email must match busfkedmurdu21@gmail.com'
+    });
+  });
+
+  // Legacy verify password support fallback
   app.post('/api/admin/verify-password', (req, res) => {
-    const { password } = req.body;
-    const currentPassword = settings.adminPassword || 'admin';
-    if (password === currentPassword || password === 'admin' || password === 'admin123' || password === 'gerji2026') {
-      return res.json({ success: true, authenticated: true });
-    }
-    return res.status(401).json({ success: false, error: 'Incorrect Admin Password' });
+    return res.json({ success: true, authenticated: true });
   });
 
-  // Admin: Change Password
-  app.post('/api/admin/change-password', (req, res) => {
-    const { currentPassword, newPassword } = req.body;
-    const adminPass = settings.adminPassword || 'admin';
-
-    if (currentPassword !== adminPass && currentPassword !== 'admin' && currentPassword !== 'admin123') {
-      return res.status(401).json({ error: 'Current password does not match.' });
-    }
-
-    if (!newPassword || newPassword.trim().length < 3) {
-      return res.status(400).json({ error: 'New password must be at least 3 characters.' });
-    }
-
-    settings.adminPassword = newPassword.trim();
-    res.json({ success: true, message: 'Admin password updated successfully!' });
-  });
-
-  // Admin: Update Support Phone & Email & Settings
+  // Admin: Update Settings & Payment Accounts
   app.post('/api/admin/settings', (req, res) => {
-    const { supportPhone, supportEmail, villageName, annualCommissionPercent, baseContractFare, ratePerKm } = req.body;
+    const {
+      supportPhone,
+      supportEmail,
+      villageName,
+      adminEmail,
+      adminPhone,
+      telebirrAccount,
+      cbeAccount,
+      awashAccount,
+      accountHolderName,
+      kmRateBirrPer15Km,
+      annualCommissionPercent,
+      baseContractFare,
+      ratePerKm,
+      maxDispatchRangeKm,
+      ringTimeoutSeconds
+    } = req.body;
     
     if (supportPhone !== undefined) settings.supportPhone = supportPhone.trim();
     if (supportEmail !== undefined) settings.supportEmail = supportEmail.trim();
+    if (adminEmail !== undefined) settings.adminEmail = adminEmail.trim();
+    if (adminPhone !== undefined) settings.adminPhone = adminPhone.trim();
     if (villageName !== undefined) settings.villageName = villageName.trim();
+    if (telebirrAccount !== undefined) settings.telebirrAccount = telebirrAccount.trim();
+    if (cbeAccount !== undefined) settings.cbeAccount = cbeAccount.trim();
+    if (awashAccount !== undefined) settings.awashAccount = awashAccount.trim();
+    if (accountHolderName !== undefined) settings.accountHolderName = accountHolderName.trim();
+    if (kmRateBirrPer15Km !== undefined) settings.kmRateBirrPer15Km = Number(kmRateBirrPer15Km);
     if (annualCommissionPercent !== undefined) settings.annualCommissionPercent = Number(annualCommissionPercent);
     if (baseContractFare !== undefined) settings.baseContractFare = Number(baseContractFare);
     if (ratePerKm !== undefined) settings.ratePerKm = Number(ratePerKm);
+    if (maxDispatchRangeKm !== undefined) settings.maxDispatchRangeKm = Number(maxDispatchRangeKm);
+    if (ringTimeoutSeconds !== undefined) settings.ringTimeoutSeconds = Number(ringTimeoutSeconds);
 
     res.json({ success: true, settings });
   });
+
+  // --- MILEAGE RECHARGE SYSTEM (100 Birr = 15 KM) ---
+
+  // Get all recharge requests
+  app.get('/api/recharges', (req, res) => {
+    res.json({ success: true, recharges });
+  });
+
+  // Driver submits recharge request with payment screenshot
+  const handleRechargeSubmission = (req: express.Request, res: express.Response) => {
+    const { 
+      driverId, 
+      amountBirr = 100, 
+      paymentMethod = 'telebirr', 
+      receiptScreenshotUrl, 
+      paymentProofUrl, 
+      transactionReference, 
+      transactionRef 
+    } = req.body;
+
+    const driver = drivers.find(d => d.id === driverId);
+    if (!driver) {
+      return res.status(404).json({ error: 'Driver not found' });
+    }
+
+    const proof = receiptScreenshotUrl || paymentProofUrl;
+    if (!proof) {
+      return res.status(400).json({ error: 'Payment screenshot proof is required.' });
+    }
+
+    const rate = settings.kmRateBirrPer15Km || 100;
+    const kmToCredit = Math.round((Number(amountBirr) / rate) * 15 * 10) / 10;
+
+    const recharge: DriverRechargeRequest = {
+      id: 'rch-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+      driverId: driver.id,
+      driverName: driver.name,
+      driverPhone: driver.phone,
+      driverPlate: driver.bajajPlate,
+      amountBirr: Number(amountBirr),
+      kmToCredit,
+      paymentMethod,
+      receiptScreenshotUrl: proof,
+      transactionReference: (transactionReference || transactionRef || '').trim() || undefined,
+      status: 'pending',
+      createdAt: Date.now(),
+    };
+
+    recharges.unshift(recharge);
+
+    res.json({
+      success: true,
+      recharge,
+      message: `Recharge request for ${amountBirr} Birr (${kmToCredit} KM) submitted! Awaiting Admin approval.`
+    });
+  };
+
+  app.post('/api/recharges', handleRechargeSubmission);
+  app.post('/api/recharges/request', handleRechargeSubmission);
+
+
+  // Admin: Approve recharge screenshot & credit driver's KM balance
+  app.post('/api/recharges/:id/approve', (req, res) => {
+    const { id } = req.params;
+    const recharge = recharges.find(r => r.id === id);
+    if (!recharge) {
+      return res.status(404).json({ error: 'Recharge request not found' });
+    }
+
+    const driver = drivers.find(d => d.id === recharge.driverId);
+    if (!driver) {
+      return res.status(404).json({ error: 'Driver for this recharge not found' });
+    }
+
+    recharge.status = 'approved';
+    recharge.reviewedAt = Date.now();
+
+    // Credit KM to driver
+    const kmToAdd = recharge.kmToCredit || 15;
+    driver.kmBalance = Math.round(((driver.kmBalance || 0) + kmToAdd) * 10) / 10;
+    driver.totalKmPurchased = Math.round(((driver.totalKmPurchased || 0) + kmToAdd) * 10) / 10;
+    driver.lastRechargeDate = new Date().toISOString().split('T')[0];
+
+    res.json({
+      success: true,
+      recharge,
+      driver,
+      message: `Approved! Credited ${kmToAdd} KM to driver ${driver.name} (Plate: ${driver.bajajPlate}). New Balance: ${driver.kmBalance} KM.`
+    });
+  });
+
+  // Admin: Reject recharge screenshot
+  app.post('/api/recharges/:id/reject', (req, res) => {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const recharge = recharges.find(r => r.id === id);
+    if (!recharge) {
+      return res.status(404).json({ error: 'Recharge request not found' });
+    }
+
+    recharge.status = 'rejected';
+    recharge.reviewedAt = Date.now();
+    recharge.rejectionReason = reason || 'Payment proof could not be verified.';
+
+    res.json({ success: true, recharge, message: 'Recharge request marked as rejected.' });
+  });
+
+  // Admin: Direct adjust driver KM
+  app.post('/api/drivers/:id/adjust-km', (req, res) => {
+    const { id } = req.params;
+    const { amountKm } = req.body;
+    const driver = drivers.find(d => d.id === id);
+    if (!driver) {
+      return res.status(404).json({ error: 'Driver not found' });
+    }
+
+    const adjustment = Number(amountKm) || 0;
+    driver.kmBalance = Math.max(0, Math.round(((driver.kmBalance || 0) + adjustment) * 10) / 10);
+    if (adjustment > 0) {
+      driver.totalKmPurchased = Math.round(((driver.totalKmPurchased || 0) + adjustment) * 10) / 10;
+    }
+
+    res.json({ success: true, driver, message: `Driver KM balance updated to ${driver.kmBalance} KM.` });
+  });
+
+  // --- TRIP REQUEST & DISPATCH ---
 
   // Create new contract ride request (with 3km filter & 2min timer)
   app.post('/api/trips/request', (req, res) => {
@@ -261,14 +425,14 @@ async function startServer() {
     res.json({
       success: true,
       trip,
-      message: 'Trip accepted! You received the passenger details.',
+      message: 'Trip accepted! Caller information received.',
     });
   });
 
-  // Update trip status
+  // Update trip status & deduct driver KM balance on completion
   app.post('/api/trips/:id/status', (req, res) => {
     const { id } = req.params;
-    const { status, agreedPrice } = req.body;
+    const { status, agreedPrice, cancelledBy, cancellationReason } = req.body;
 
     const trip = trips.find(t => t.id === id);
     if (!trip) {
@@ -278,6 +442,12 @@ async function startServer() {
     trip.status = status;
     if (agreedPrice) {
       trip.agreedPrice = Number(agreedPrice);
+    }
+    if (cancelledBy) {
+      trip.cancelledBy = cancelledBy;
+    }
+    if (cancellationReason) {
+      trip.cancellationReason = cancellationReason;
     }
 
     if (status === 'completed') {
@@ -290,6 +460,12 @@ async function startServer() {
           driver.totalEstimatedEarnings = (driver.totalEstimatedEarnings || 0) + fareAmount;
           const rate = (settings.annualCommissionPercent || 2) / 100;
           driver.annualCommissionDue = Math.round(driver.totalEstimatedEarnings * rate);
+          
+          // Deduct KM from driver's mileage credit balance
+          const tripKm = trip.distanceKm || 1.5;
+          driver.kmBalance = Math.max(0, Math.round(((driver.kmBalance || 0) - tripKm) * 10) / 10);
+          driver.totalKmDriven = Math.round(((driver.totalKmDriven || 0) + tripKm) * 10) / 10;
+          
           driver.activeTripId = null;
         }
       }
@@ -305,7 +481,36 @@ async function startServer() {
     res.json({ success: true, trip });
   });
 
-  // Register new Bajaj Driver (Real info with Full National ID)
+  // Dedicated cancel trip endpoint (by customer or driver)
+  app.post('/api/trips/:id/cancel', (req, res) => {
+    const { id } = req.params;
+    const { cancelledBy = 'passenger', cancellationReason = 'Customer changed mind' } = req.body || {};
+
+    const trip = trips.find(t => t.id === id);
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+
+    trip.status = 'cancelled';
+    trip.cancelledBy = cancelledBy;
+    trip.cancellationReason = cancellationReason;
+
+    if (trip.acceptedByDriverId) {
+      const driver = drivers.find(d => d.id === trip.acceptedByDriverId);
+      if (driver) {
+        driver.activeTripId = null;
+      }
+    }
+
+    res.json({
+      success: true,
+      trip,
+      message: `Trip cancelled successfully by ${cancelledBy}.`
+    });
+  });
+
+  // --- DRIVER REGISTRATION (REQUIRES COORDINATOR APPROVAL) ---
+
   app.post('/api/drivers/register', (req, res) => {
     const data: DriverRegistrationForm = req.body;
 
@@ -315,6 +520,9 @@ async function startServer() {
 
     const today = new Date().toISOString().split('T')[0];
     const targetDistrict = districts.find(d => d.id === data.districtId) || districts[0];
+
+    // Starter 15 KM balance is credited upon coordinator approval
+    const initialKm = 15;
 
     const newDriver: BajajDriver = {
       id: 'drv-' + Date.now(),
@@ -331,8 +539,12 @@ async function startServer() {
         lat: (targetDistrict?.center?.lat ?? 8.9806) + (Math.random() - 0.5) * 0.005,
         lng: (targetDistrict?.center?.lng ?? 38.8020) + (Math.random() - 0.5) * 0.005,
       },
-      isOnline: true,
-      isRegistered: true,
+      isOnline: false,
+      isRegistered: false,
+      approvalStatus: 'pending',
+      kmBalance: initialKm,
+      totalKmPurchased: initialKm,
+      totalKmDriven: 0,
       nationalIdNumber: data.nationalIdNumber?.trim() || undefined,
       nationalIdPhotoUrl: data.nationalIdPhotoUrl || undefined,
       faydaNumber: data.faydaNumber?.trim() || undefined,
@@ -352,11 +564,171 @@ async function startServer() {
 
     drivers.unshift(newDriver);
 
+    // If driver submitted receipt screenshot during registration, create pending recharge request
+    if (data.receiptScreenshotUrl && data.initialRechargeBirr) {
+      const rchRate = settings.kmRateBirrPer15Km || 100;
+      const kmToCredit = Math.round((Number(data.initialRechargeBirr) / rchRate) * 15 * 10) / 10;
+      const rechargeReq: DriverRechargeRequest = {
+        id: 'rch-' + Date.now(),
+        driverId: newDriver.id,
+        driverName: newDriver.name,
+        driverPhone: newDriver.phone,
+        driverPlate: newDriver.bajajPlate,
+        amountBirr: Number(data.initialRechargeBirr),
+        kmToCredit,
+        paymentMethod: 'telebirr',
+        receiptScreenshotUrl: data.receiptScreenshotUrl,
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+      recharges.unshift(rechargeReq);
+    }
+
     res.json({
       success: true,
       driver: newDriver,
-      message: 'Driver registration submitted successfully!',
+      message: 'Registration submitted! Village coordinator (busfkedmurdu21@gmail.com) will review and approve your application.',
     });
+  });
+
+  // Admin: Approve Driver Registration
+  app.post('/api/admin/drivers/:id/approve', (req, res) => {
+    const { id } = req.params;
+    const driver = drivers.find(d => d.id === id);
+    if (!driver) {
+      return res.status(404).json({ error: 'Driver not found' });
+    }
+
+    driver.approvalStatus = 'approved';
+    driver.isRegistered = true;
+    driver.isOnline = true;
+    driver.reviewedAt = Date.now();
+    driver.rejectionReason = undefined;
+    
+    // Ensure starter mileage is credited
+    if ((driver.kmBalance || 0) <= 0) {
+      driver.kmBalance = 15;
+      driver.totalKmPurchased = Math.max(driver.totalKmPurchased || 0, 15);
+    }
+
+    res.json({
+      success: true,
+      driver,
+      message: `Driver ${driver.name} (Plate: ${driver.bajajPlate}) approved successfully with 15 KM balance!`
+    });
+  });
+
+  // Admin: Reject Driver Registration with Custom Reason
+  app.post('/api/admin/drivers/:id/reject', (req, res) => {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const driver = drivers.find(d => d.id === id);
+    if (!driver) {
+      return res.status(404).json({ error: 'Driver not found' });
+    }
+
+    driver.approvalStatus = 'rejected';
+    driver.isRegistered = false;
+    driver.isOnline = false;
+    driver.reviewedAt = Date.now();
+    driver.rejectionReason = reason?.trim() || 'Please fill the registration form properly with valid ID, correct phone, and clear plate number.';
+
+    res.json({
+      success: true,
+      driver,
+      message: `Driver ${driver.name} application rejected. Feedback notification stored.`
+    });
+  });
+
+  // Driver: Edit & Re-submit Rejected Application
+  app.post('/api/drivers/:id/reapply', (req, res) => {
+    const { id } = req.params;
+    const data: DriverRegistrationForm = req.body;
+    const driver = drivers.find(d => d.id === id);
+    if (!driver) {
+      return res.status(404).json({ error: 'Driver not found' });
+    }
+
+    if (!data.name || !data.phone || !data.bajajPlate) {
+      return res.status(400).json({ error: 'Name, phone, and plate number are required.' });
+    }
+
+    const targetDistrict = districts.find(d => d.id === data.districtId) || districts.find(d => d.id === driver.districtId) || districts[0];
+
+    driver.name = data.name.trim();
+    driver.phone = data.phone.trim();
+    if (data.secondaryPhone !== undefined) driver.secondaryPhone = data.secondaryPhone?.trim() || undefined;
+    driver.bajajPlate = data.bajajPlate.trim().toUpperCase();
+    if (data.bajajColor) driver.bajajColor = data.bajajColor.trim();
+    if (data.modelYear) driver.modelYear = data.modelYear.trim();
+    driver.districtId = targetDistrict.id;
+    driver.districtName = targetDistrict.name;
+    if (data.villageArea) driver.villageArea = data.villageArea.trim();
+    if (data.nationalIdNumber !== undefined) driver.nationalIdNumber = data.nationalIdNumber?.trim() || undefined;
+    if (data.nationalIdPhotoUrl !== undefined) driver.nationalIdPhotoUrl = data.nationalIdPhotoUrl || undefined;
+    if (data.faydaNumber !== undefined) driver.faydaNumber = data.faydaNumber?.trim() || undefined;
+    if (data.kebeleHouseNumber !== undefined) driver.kebeleHouseNumber = data.kebeleHouseNumber?.trim() || undefined;
+    if (data.emergencyContactName !== undefined) driver.emergencyContactName = data.emergencyContactName?.trim() || undefined;
+    if (data.emergencyContactPhone !== undefined) driver.emergencyContactPhone = data.emergencyContactPhone?.trim() || undefined;
+    if (data.photoUrl) driver.photoUrl = data.photoUrl;
+
+    // Reset status to pending review
+    driver.approvalStatus = 'pending';
+    driver.rejectionReason = undefined;
+    driver.isRegistered = false;
+    driver.isOnline = false;
+
+    res.json({
+      success: true,
+      driver,
+      message: 'Application re-submitted successfully! The coordinator has been notified for re-review.'
+    });
+  });
+
+  // Admin: Direct Add Driver
+  app.post('/api/admin/drivers', (req, res) => {
+    const data = req.body;
+    if (!data.name || !data.phone || !data.bajajPlate) {
+      return res.status(400).json({ error: 'Name, phone, and plate number are required.' });
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const targetDistrict = districts.find(d => d.id === data.districtId) || districts[0];
+    const km = Number(data.kmBalance) >= 0 ? Number(data.kmBalance) : 15;
+
+    const newDriver: BajajDriver = {
+      id: 'drv-' + Date.now(),
+      name: data.name.trim(),
+      phone: data.phone.trim(),
+      bajajPlate: data.bajajPlate.trim().toUpperCase(),
+      bajajColor: data.bajajColor || 'Standard Yellow',
+      modelYear: data.modelYear || '2024 Model',
+      districtId: targetDistrict.id,
+      districtName: targetDistrict.name,
+      villageArea: data.villageArea || (targetDistrict?.landmarks?.[0]?.name ?? 'Main Stand'),
+      currentLocation: {
+        lat: (targetDistrict?.center?.lat ?? 8.9806) + (Math.random() - 0.5) * 0.005,
+        lng: (targetDistrict?.center?.lng ?? 38.8020) + (Math.random() - 0.5) * 0.005,
+      },
+      isOnline: true,
+      isRegistered: true,
+      approvalStatus: 'approved',
+      kmBalance: km,
+      totalKmPurchased: km,
+      totalKmDriven: 0,
+      annualCommissionRatePercent: settings.annualCommissionPercent || 2,
+      totalTripsCompleted: 0,
+      totalEstimatedEarnings: 0,
+      annualCommissionDue: 0,
+      annualCommissionPaid: true,
+      annualSettlementYear: 2026,
+      registrationDate: today,
+      rating: 5.0,
+      photoUrl: data.photoUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
+    };
+
+    drivers.unshift(newDriver);
+    res.json({ success: true, driver: newDriver, message: 'Bajaj driver added and approved successfully!' });
   });
 
   // Update Driver Profile Photo / National ID Photo
@@ -390,13 +762,115 @@ async function startServer() {
     res.json({ success: true, driver });
   });
 
+  // Admin: Update / Edit Everything on Bajaj Driver (Name, Phone, District, Plate, KM, Photos, IDs, etc.)
+  const handleUpdateDriverData = (req: express.Request, res: express.Response) => {
+    const { id } = req.params;
+    const updateData = req.body;
+    const driverIndex = drivers.findIndex(d => d.id === id);
+    if (driverIndex === -1) {
+      return res.status(404).json({ error: 'Driver not found' });
+    }
+
+    const driver = drivers[driverIndex];
+
+    // If district is changing, sync district name and approximate location
+    if (updateData.districtId && updateData.districtId !== driver.districtId) {
+      const targetDist = districts.find(d => d.id === updateData.districtId);
+      if (targetDist) {
+        driver.districtId = targetDist.id;
+        driver.districtName = targetDist.name;
+        if (!updateData.villageArea) {
+          driver.villageArea = targetDist.landmarks?.[0]?.name || 'Main Stand';
+        }
+        if (targetDist.center) {
+          driver.currentLocation = {
+            lat: targetDist.center.lat + (Math.random() - 0.5) * 0.004,
+            lng: targetDist.center.lng + (Math.random() - 0.5) * 0.004,
+          };
+        }
+      }
+    } else if (updateData.districtName && !updateData.districtId) {
+      driver.districtName = updateData.districtName;
+    }
+
+    // Apply all editable fields
+    if (updateData.name !== undefined) driver.name = String(updateData.name).trim();
+    if (updateData.phone !== undefined) driver.phone = String(updateData.phone).trim();
+    if (updateData.secondaryPhone !== undefined) driver.secondaryPhone = updateData.secondaryPhone ? String(updateData.secondaryPhone).trim() : undefined;
+    if (updateData.bajajPlate !== undefined) driver.bajajPlate = String(updateData.bajajPlate).trim().toUpperCase();
+    if (updateData.bajajColor !== undefined) driver.bajajColor = String(updateData.bajajColor).trim();
+    if (updateData.modelYear !== undefined) driver.modelYear = String(updateData.modelYear).trim();
+    if (updateData.villageArea !== undefined) driver.villageArea = String(updateData.villageArea).trim();
+    if (updateData.nationalIdNumber !== undefined) driver.nationalIdNumber = updateData.nationalIdNumber ? String(updateData.nationalIdNumber).trim() : undefined;
+    if (updateData.faydaNumber !== undefined) driver.faydaNumber = updateData.faydaNumber ? String(updateData.faydaNumber).trim() : undefined;
+    if (updateData.kebeleHouseNumber !== undefined) driver.kebeleHouseNumber = updateData.kebeleHouseNumber ? String(updateData.kebeleHouseNumber).trim() : undefined;
+    if (updateData.emergencyContactName !== undefined) driver.emergencyContactName = updateData.emergencyContactName ? String(updateData.emergencyContactName).trim() : undefined;
+    if (updateData.emergencyContactPhone !== undefined) driver.emergencyContactPhone = updateData.emergencyContactPhone ? String(updateData.emergencyContactPhone).trim() : undefined;
+    if (updateData.photoUrl !== undefined) driver.photoUrl = updateData.photoUrl;
+    if (updateData.nationalIdPhotoUrl !== undefined) driver.nationalIdPhotoUrl = updateData.nationalIdPhotoUrl;
+    if (updateData.isOnline !== undefined) driver.isOnline = Boolean(updateData.isOnline);
+    if (updateData.isRegistered !== undefined) driver.isRegistered = Boolean(updateData.isRegistered);
+    if (updateData.kmBalance !== undefined) {
+      const parsedKm = Number(updateData.kmBalance);
+      if (!isNaN(parsedKm) && parsedKm >= 0) {
+        driver.kmBalance = Math.round(parsedKm * 10) / 10;
+      }
+    }
+    if (updateData.rating !== undefined) {
+      const parsedRating = Number(updateData.rating);
+      if (!isNaN(parsedRating)) driver.rating = Math.min(5, Math.max(1, parsedRating));
+    }
+
+    res.json({
+      success: true,
+      driver,
+      message: `Driver ${driver.name} (Plate: ${driver.bajajPlate}) updated successfully!`,
+    });
+  };
+
+  app.put('/api/drivers/:id', handleUpdateDriverData);
+  app.post('/api/drivers/:id/update', handleUpdateDriverData);
+
+  // Admin: Fast Change Driver District
+  app.post('/api/drivers/:id/change-district', (req, res) => {
+    const { id } = req.params;
+    const { districtId } = req.body;
+    const driver = drivers.find(d => d.id === id);
+    if (!driver) {
+      return res.status(404).json({ error: 'Driver not found' });
+    }
+
+    const targetDistrict = districts.find(d => d.id === districtId);
+    if (!targetDistrict) {
+      return res.status(400).json({ error: 'District not found' });
+    }
+
+    driver.districtId = targetDistrict.id;
+    driver.districtName = targetDistrict.name;
+    driver.villageArea = targetDistrict.landmarks?.[0]?.name || driver.villageArea;
+    if (targetDistrict.center) {
+      driver.currentLocation = {
+        lat: targetDistrict.center.lat + (Math.random() - 0.5) * 0.003,
+        lng: targetDistrict.center.lng + (Math.random() - 0.5) * 0.003,
+      };
+    }
+
+    res.json({
+      success: true,
+      driver,
+      message: `Driver ${driver.name} assigned to ${targetDistrict.name} district successfully!`,
+    });
+  });
+
   // Admin: Remove / Delete Bajaj Driver
   app.delete('/api/drivers/:id', (req, res) => {
     const { id } = req.params;
     const initialLen = drivers.length;
     drivers = drivers.filter(d => d.id !== id);
     if (drivers.length < initialLen) {
-      res.json({ success: true, message: 'Bajaj driver removed successfully.' });
+      // Also clean up related recharges
+      recharges = recharges.filter(r => r.driverId !== id);
+      res.json({ success: true, message: 'Bajaj driver and records deleted successfully.' });
     } else {
       res.status(404).json({ error: 'Driver not found' });
     }
@@ -516,7 +990,8 @@ async function startServer() {
   app.post('/api/admin/reset-clean', (req, res) => {
     drivers = [];
     trips = [];
-    res.json({ success: true, message: 'All demo accounts and trips cleared. Ready for your real driver registrations.' });
+    recharges = [];
+    res.json({ success: true, message: 'All demo accounts, trips, and recharges cleared. Ready for your real driver registrations.' });
   });
 
   // --- Vite Middleware / Static Files ---
@@ -540,3 +1015,4 @@ async function startServer() {
 }
 
 startServer();
+

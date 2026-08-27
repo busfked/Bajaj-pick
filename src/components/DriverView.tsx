@@ -4,7 +4,8 @@ import {
   ContractTrip, 
   VillageSettings, 
   DriverRingtoneOption,
-  AppLanguage 
+  AppLanguage,
+  ColorTheme
 } from '../types';
 import { VillageMap } from './VillageMap';
 import { 
@@ -21,11 +22,14 @@ import {
   MessageSquare,
   Users,
   Briefcase,
-  Percent,
   Volume2,
   Play,
   Crosshair,
-  UserPlus
+  UserPlus,
+  Gauge,
+  PlusCircle,
+  ArrowRight,
+  AlertCircle
 } from 'lucide-react';
 import { 
   startDriverAlertSound, 
@@ -36,6 +40,8 @@ import {
 } from '../utils/audio';
 import confetti from 'canvas-confetti';
 import { t } from '../utils/translations';
+import { COLOR_THEMES } from '../utils/colors';
+import { DriverRechargeModal } from './DriverRechargeModal';
 
 interface DriverViewProps {
   drivers: BajajDriver[];
@@ -45,7 +51,10 @@ interface DriverViewProps {
   onUpdateTripStatus: (tripId: string, status: ContractTrip['status'], agreedPrice?: number) => Promise<void>;
   onToggleDriverOnline: (driverId: string, isOnline: boolean) => Promise<void>;
   onRegisterDriverClick: () => void;
+  onBackToPassenger?: () => void;
+  onCancelTrip?: (tripId: string, reason?: string, cancelledBy?: 'passenger' | 'driver' | 'admin') => Promise<void>;
   lang?: AppLanguage;
+  colorTheme?: ColorTheme;
 }
 
 export const DriverView: React.FC<DriverViewProps> = ({
@@ -56,7 +65,10 @@ export const DriverView: React.FC<DriverViewProps> = ({
   onUpdateTripStatus,
   onToggleDriverOnline,
   onRegisterDriverClick,
+  onBackToPassenger,
+  onCancelTrip,
   lang = 'en',
+  colorTheme = 'emerald',
 }) => {
   // Current active driver selected in this session
   const [selectedDriverId, setSelectedDriverId] = useState<string>(drivers[0]?.id || '');
@@ -64,12 +76,22 @@ export const DriverView: React.FC<DriverViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [negotiatedPrice, setNegotiatedPrice] = useState<string>('');
   
+  // Driver cancellation state
+  const [isDriverCancelModalOpen, setIsDriverCancelModalOpen] = useState(false);
+  const [driverCancelReason, setDriverCancelReason] = useState<string>('Passenger did not show up');
+  const [isCancellingTrip, setIsCancellingTrip] = useState(false);
+  
   // Audio Ringtone Selection
   const [selectedRingtone, setSelectedRingtone] = useState<DriverRingtoneOption>('bajaj_voice');
 
   // Live GPS tracking state
   const [isTrackingLocation, setIsTrackingLocation] = useState(false);
   const [locationStatusText, setLocationStatusText] = useState<string | null>(null);
+
+  // Recharge modal
+  const [isRechargeModalOpen, setIsRechargeModalOpen] = useState(false);
+
+  const activeColor = COLOR_THEMES[colorTheme] || COLOR_THEMES.emerald;
 
   // Sync selected driver if drivers array changes
   useEffect(() => {
@@ -90,7 +112,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
     (activeTrip.targetDriverIds.length === 0 || activeTrip.targetDriverIds.includes(currentDriver.id))
   );
 
-  // Trigger polite ringtone when trip is ringing
+  // Trigger ringtone when trip is ringing
   useEffect(() => {
     if (isIncomingRing) {
       startDriverAlertSound(selectedRingtone, lang);
@@ -112,6 +134,13 @@ export const DriverView: React.FC<DriverViewProps> = ({
   // Handle Quick Accept
   const handleQuickAccept = async () => {
     if (!activeTrip || !currentDriver) return;
+    
+    // Check if driver has sufficient KM balance
+    if ((currentDriver.kmBalance || 0) <= 0) {
+      setErrorMessage(lang === 'am' ? 'የኪሎሜትር ባላንስ አልቆቦታል! እባክዎ 100 ብር (15 ኪ.ሜ) ይሙሉ' : 'KM Balance is 0! Please recharge 100 Birr for 15 KM first.');
+      return;
+    }
+
     setIsAccepting(true);
     setErrorMessage(null);
     try {
@@ -181,7 +210,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
     return (
       <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-6">
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl space-y-5">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 mx-auto flex items-center justify-center">
+          <div className={`w-16 h-16 rounded-2xl ${activeColor.primaryLight} ${activeColor.textPrimary} mx-auto flex items-center justify-center`}>
             <Car className="w-8 h-8" />
           </div>
           <div className="space-y-2">
@@ -190,33 +219,73 @@ export const DriverView: React.FC<DriverViewProps> = ({
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
               {lang === 'am'
-                ? 'እርስዎ እራስዎ የመጀመሪያውን ባጃጅ በመመዝገብ የቀጥታ ጥሪውንና የድምፅ ማሳወቂያውን መሞከር ይችላሉ!'
-                : 'Clean slate active! Register your own driver account to test instant contrat calls and voice ringtones live.'}
+                ? 'ምዝገባው 100% ነፃ ነው! ባጃጅዎን በመመዝገብ የ15 ኪ.ሜ ነፃ ስጦታ ያግኙና ጥሪ መቀበል ይጀምሩ።'
+                : 'Registration is 100% free! Register your Bajaj now, receive 15 KM starter balance, and begin receiving passenger calls.'}
             </p>
           </div>
 
-          <button
-            onClick={onRegisterDriverClick}
-            className="w-full py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm shadow-lg shadow-emerald-500/25 transition-all flex items-center justify-center space-x-2 cursor-pointer font-['Outfit']"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>{t(lang, 'registerBajajBtn')}</span>
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+            {onBackToPassenger && (
+              <button
+                type="button"
+                onClick={onBackToPassenger}
+                className="flex-1 py-3.5 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs sm:text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors font-['Outfit'] cursor-pointer"
+              >
+                {lang === 'am' ? '← ወደ ተሳፋሪ ገጽ' : '← Back to Passenger'}
+              </button>
+            )}
+            <button
+              onClick={onRegisterDriverClick}
+              className={`flex-1 py-3.5 rounded-2xl ${activeColor.primaryBg} hover:opacity-90 text-white font-bold text-sm shadow-lg shadow-emerald-500/25 transition-all flex items-center justify-center space-x-2 cursor-pointer font-['Outfit']`}
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>{t(lang, 'registerBajajBtn')}</span>
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+  const kmBalance = currentDriver?.kmBalance ?? 15;
+  const isKmLow = kmBalance < 5;
+  const isKmEmpty = kmBalance <= 0;
 
-      {/* Driver Identity Switcher & Controls Bar */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+  return (
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 space-y-5">
+
+      {/* Top Driver Navigation & Switcher Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div className="flex items-center space-x-2">
+          {onBackToPassenger && (
+            <button
+              type="button"
+              id="btn-driver-back-passenger"
+              onClick={onBackToPassenger}
+              className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition-colors cursor-pointer"
+            >
+              <span>{lang === 'am' ? '← ወደ ተሳፋሪ ገጽ ተመለስ' : '← Back to Passenger Booking'}</span>
+            </button>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={onRegisterDriverClick}
+          className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold text-xs border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer"
+        >
+          <UserPlus className="w-3.5 h-3.5" />
+          <span>{lang === 'am' ? '+ አዲስ ባጃጅ መዝግብ' : '+ Register New Bajaj'}</span>
+        </button>
+      </div>
+
+      {/* Top Driver Bar: Profile Selector, Online Toggle, and Mileage Credit Status */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           
           {/* Driver Avatar & Select */}
           <div className="flex items-center space-x-3.5">
-            <div className="relative w-14 h-14 rounded-2xl overflow-hidden border-2 border-emerald-500 shadow-md shrink-0 bg-slate-800 flex items-center justify-center">
+            <div className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden border-2 border-emerald-500 shadow-md shrink-0 bg-slate-800 flex items-center justify-center">
               {currentDriver?.photoUrl ? (
                 <img
                   src={currentDriver.photoUrl}
@@ -233,7 +302,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 <select
                   value={selectedDriverId}
                   onChange={(e) => setSelectedDriverId(e.target.value)}
-                  className="font-bold text-base text-slate-900 dark:text-white bg-transparent border-b border-slate-300 dark:border-slate-700 pb-0.5 outline-hidden cursor-pointer font-['Outfit']"
+                  className="font-bold text-sm sm:text-base text-slate-900 dark:text-white bg-transparent border-b border-slate-300 dark:border-slate-700 pb-0.5 outline-hidden cursor-pointer font-['Outfit']"
                 >
                   {drivers.map((d) => (
                     <option key={d.id} value={d.id} className="text-slate-900 bg-white dark:bg-slate-900">
@@ -255,39 +324,85 @@ export const DriverView: React.FC<DriverViewProps> = ({
             </div>
           </div>
 
-          {/* Online Toggle & Quick Actions */}
+          {/* Mileage / KM Balance Card & Quick Recharge Button */}
           <div className="flex flex-wrap items-center gap-3">
+            
+            {/* KM Balance Pill */}
+            <div className={`flex items-center space-x-2.5 px-3.5 py-2 rounded-2xl border ${
+              isKmEmpty 
+                ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300'
+                : isKmLow
+                  ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300'
+                  : 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+            }`}>
+              <Gauge className="w-4 h-4 shrink-0" />
+              <div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">
+                    {lang === 'am' ? 'የቀረ ኪሎሜትር' : 'Mileage Balance'}
+                  </span>
+                </div>
+                <span className="font-bold font-mono text-sm sm:text-base leading-tight">
+                  {kmBalance.toFixed(1)} KM
+                </span>
+              </div>
+            </div>
+
+            {/* Direct Recharge Button (100 Birr = 15 KM) */}
+            <button
+              onClick={() => setIsRechargeModalOpen(true)}
+              className="px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-md shadow-amber-500/20 flex items-center space-x-1.5 transition-all cursor-pointer"
+            >
+              <PlusCircle className="w-4 h-4" />
+              <span>{lang === 'am' ? 'ኪሎሜትር ሙላ (100 ብር)' : 'Recharge KM (100 Br)'}</span>
+            </button>
+
+            {/* Online Status Toggle */}
+            {currentDriver && (
+              <button
+                disabled={currentDriver.approvalStatus !== 'approved'}
+                onClick={() => {
+                  if (currentDriver.approvalStatus !== 'approved') return;
+                  onToggleDriverOnline(currentDriver.id, !currentDriver.isOnline);
+                }}
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all cursor-pointer font-['Outfit'] ${
+                  currentDriver.approvalStatus !== 'approved'
+                    ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-75'
+                    : currentDriver.isOnline
+                      ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300'
+                }`}
+                title={
+                  currentDriver.approvalStatus === 'pending'
+                    ? 'Pending Coordinator Approval'
+                    : currentDriver.approvalStatus === 'rejected'
+                      ? 'Application Rejected - Fix Errors First'
+                      : 'Toggle Online/Offline'
+                }
+              >
+                {currentDriver.approvalStatus === 'pending'
+                  ? (lang === 'am' ? '⏳ በማጽደቅ ላይ...' : '⏳ Under Review')
+                  : currentDriver.approvalStatus === 'rejected'
+                    ? (lang === 'am' ? '⚠️ ውድቅ ተደርጓል' : '⚠️ Rejected')
+                    : currentDriver.isOnline
+                      ? `● ${t(lang, 'online')}`
+                      : `○ ${t(lang, 'offline')}`}
+              </button>
+            )}
+
+            {/* Sync GPS */}
             <button
               onClick={handleToggleRealtimeLocation}
-              className={`px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center space-x-1.5 transition-colors cursor-pointer ${
+              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center transition-colors cursor-pointer ${
                 isTrackingLocation
                   ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-700 dark:text-emerald-300'
                   : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
+              title="Sync GPS Location"
             >
-              <Crosshair className={`w-3.5 h-3.5 ${isTrackingLocation ? 'text-emerald-500 animate-spin' : ''}`} />
-              <span>{isTrackingLocation ? 'GPS Tracking Active' : 'Sync Live GPS'}</span>
+              <Crosshair className={`w-4 h-4 ${isTrackingLocation ? 'text-emerald-500 animate-spin' : ''}`} />
             </button>
 
-            {currentDriver && (
-              <button
-                onClick={() => onToggleDriverOnline(currentDriver.id, !currentDriver.isOnline)}
-                className={`px-5 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all cursor-pointer font-['Outfit'] ${
-                  currentDriver.isOnline
-                    ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20'
-                    : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300'
-                }`}
-              >
-                {currentDriver.isOnline ? `● ${t(lang, 'online')}` : `○ ${t(lang, 'offline')}`}
-              </button>
-            )}
-
-            <button
-              onClick={onRegisterDriverClick}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs hover:bg-slate-800 transition-colors cursor-pointer"
-            >
-              + {lang === 'am' ? 'ሌላ ባጃጅ መዝግብ' : 'Register New'}
-            </button>
           </div>
 
         </div>
@@ -298,21 +413,19 @@ export const DriverView: React.FC<DriverViewProps> = ({
           </p>
         )}
 
-        {/* Ringtone Selector & Test Sound Bar */}
-        <div className="p-3.5 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center space-x-2">
-            <Volume2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-              {t(lang, 'ringtoneChoice')}:
-            </span>
+        {/* Ringtone Selection & Test */}
+        <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center space-x-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+            <Volume2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>{t(lang, 'ringtoneChoice')}:</span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => setSelectedRingtone('bajaj_voice')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 selectedRingtone === 'bajaj_voice'
-                  ? 'bg-emerald-500 text-white shadow-xs'
+                  ? `${activeColor.primaryBg} text-white`
                   : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
               }`}
             >
@@ -321,9 +434,9 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
             <button
               onClick={() => setSelectedRingtone('village_chime')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 selectedRingtone === 'village_chime'
-                  ? 'bg-emerald-500 text-white shadow-xs'
+                  ? `${activeColor.primaryBg} text-white`
                   : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
               }`}
             >
@@ -331,19 +444,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
             </button>
 
             <button
-              onClick={() => setSelectedRingtone('subtle_pulse')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                selectedRingtone === 'subtle_pulse'
-                  ? 'bg-emerald-500 text-white shadow-xs'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              {t(lang, 'ringtoneRadarPulse')}
-            </button>
-
-            <button
               onClick={() => previewRingtone(selectedRingtone, lang)}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-200 text-xs font-bold flex items-center space-x-1 cursor-pointer"
+              className="px-2 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-200 text-xs font-bold flex items-center space-x-1 cursor-pointer"
               title="Test Sound"
             >
               <Play className="w-3 h-3" />
@@ -354,68 +456,177 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
       </div>
 
-      {/* ================= INCOMING RINGING CALL ALERT CARD ================= */}
-      {isIncomingRing && activeTrip && (
-        <div className="bg-emerald-600 text-white rounded-3xl p-6 sm:p-8 shadow-2xl border-4 border-emerald-400 animate-pulse space-y-5">
-          <div className="flex items-center justify-between">
-            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-white/20 text-white text-xs font-bold uppercase tracking-wider">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{t(lang, 'incomingRideAlert')}</span>
+      {/* Driver Registration Status: Rejected Notification */}
+      {currentDriver?.approvalStatus === 'rejected' && (
+        <div className="p-5 rounded-3xl bg-rose-50 dark:bg-rose-950/70 border-2 border-rose-400 dark:border-rose-700 text-rose-900 dark:text-rose-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-start space-x-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-rose-100 dark:bg-rose-900 text-rose-600 dark:text-rose-300 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-6 h-6" />
             </div>
-            <span className="text-xs font-bold bg-white text-emerald-700 px-3 py-1 rounded-full font-mono">
-              {lang === 'am' ? 'በ3 ኪ.ሜ ክልል ውስጥ' : 'Within 3 KM Range'}
-            </span>
-          </div>
-
-          <div className="space-y-2">
-            <h3 className="text-2xl sm:text-3xl font-bold font-['Outfit']">
-              {activeTrip.pickupAddress} → {activeTrip.dropoffAddress}
-            </h3>
-            <p className="text-emerald-100 text-xs sm:text-sm">
-              {lang === 'am' ? 'ተሳፋሪ፡' : 'Passenger:'} <b>{activeTrip.passengerName}</b> ({activeTrip.passengerPhone})
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 text-xs">
-            <div className="p-3 bg-emerald-700/60 rounded-xl">
-              <span className="text-emerald-200 block text-[10px]">District:</span>
-              <span className="font-bold">{activeTrip.districtName || 'Village'}</span>
-            </div>
-            <div className="p-3 bg-emerald-700/60 rounded-xl">
-              <span className="text-emerald-200 block text-[10px]">Distance:</span>
-              <span className="font-bold">{activeTrip.distanceKm.toFixed(1)} KM</span>
-            </div>
-            <div className="p-3 bg-emerald-700/60 rounded-xl">
-              <span className="text-emerald-200 block text-[10px]">Est. Rate:</span>
-              <span className="font-bold font-mono">{activeTrip.estimatedFare} Br</span>
-            </div>
-            <div className="p-3 bg-emerald-700/60 rounded-xl">
-              <span className="text-emerald-200 block text-[10px]">Settlement:</span>
-              <span className="font-bold">100% Cash / Telebirr</span>
+            <div className="space-y-1">
+              <h4 className="font-bold text-sm sm:text-base font-['Outfit']">
+                {lang === 'am' ? 'የባጃጅ ማመልከቻዎ ማስተካከያ ተጠይቆበታል' : 'Application Needs Correction'}
+              </h4>
+              <p className="text-xs text-rose-800 dark:text-rose-200">
+                {lang === 'am' ? 'አስተባባሪው (busfkedmurdu21@gmail.com) የሰጠው ማብራሪያ፡' : 'Coordinator (busfkedmurdu21@gmail.com) feedback:'}
+              </p>
+              <div className="p-2.5 bg-white/80 dark:bg-slate-900/80 rounded-xl border border-rose-200 dark:border-rose-800 text-xs font-semibold text-rose-700 dark:text-rose-300">
+                "{currentDriver.rejectionReason || (lang === 'am' ? 'እባክዎ ቅጹን እና መታወቂያዎን በትክክል ሞልተው እንደገና ይላኩ።' : 'Please fill the registration form properly and upload valid documents.')}"
+              </div>
             </div>
           </div>
-
-          {errorMessage && (
-            <p className="text-xs font-bold bg-red-500 text-white p-2.5 rounded-xl">
-              {errorMessage}
-            </p>
-          )}
-
           <button
-            onClick={handleQuickAccept}
-            disabled={isAccepting}
-            className="w-full py-4 rounded-2xl bg-white hover:bg-slate-100 text-emerald-700 font-bold text-base shadow-xl transition-transform active:scale-98 flex items-center justify-center space-x-2 cursor-pointer font-['Outfit']"
+            onClick={onRegisterDriverClick}
+            className="w-full sm:w-auto px-5 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-rose-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0 font-['Outfit']"
           >
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            <span>{isAccepting ? 'Accepting...' : t(lang, 'acceptContractRide')}</span>
+            <span>{lang === 'am' ? 'ቅጹን አስተካክለህ እንደገና ላክ ↵' : 'Fix & Resubmit Form ↵'}</span>
           </button>
         </div>
       )}
 
-      {/* ================= ACTIVE ACCEPTED TRIP MANAGEMENT CARD ================= */}
+      {/* Driver Registration Status: Under Review Notification */}
+      {currentDriver?.approvalStatus === 'pending' && (
+        <div className="p-5 rounded-3xl bg-amber-50 dark:bg-amber-950/60 border-2 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-start space-x-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-amber-100 dark:bg-amber-900 text-amber-600 dark:text-amber-300 flex items-center justify-center shrink-0">
+              <Clock className="w-6 h-6" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="font-bold text-sm sm:text-base font-['Outfit']">
+                {lang === 'am' ? 'የባጃጅ ማመልከቻዎ በመገምገም ላይ ነው' : 'Registration Under Coordinator Review'}
+              </h4>
+              <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
+                {lang === 'am'
+                  ? `የባጃጅ ታርጋዎ (${currentDriver.bajajPlate}) በአስተባባሪው busfkedmurdu21@gmail.com እየተረጋገጠ ነው። ልክ እንደጸደቀ 15 ኪ.ሜ የጅማሮ ክሬዲት ይሰጥዎታል እንዲሁም የቀጥታ የኮንትራት ጥሪዎች ይከፈቱልዎታል።`
+                  : `Your Bajaj (Plate: ${currentDriver.bajajPlate}) is awaiting verification by coordinator busfkedmurdu21@gmail.com. Once approved, you will receive 15 KM starter mileage.`}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onRegisterDriverClick}
+            className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 bg-white/70 dark:bg-slate-900/70 hover:bg-white text-xs font-bold transition-colors cursor-pointer shrink-0"
+          >
+            <span>{lang === 'am' ? 'መረጃ አርትዕ' : 'Edit Details'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 🚀 PROBLEM 1 RESOLUTION: DEDICATED INCOMING CALLER INFORMATION SCREEN */}
+      {/* ========================================================================= */}
+      {isIncomingRing && activeTrip && (
+        <div className="bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 text-white rounded-3xl p-6 sm:p-8 shadow-2xl border-4 border-emerald-300 animate-pulse space-y-6">
+          
+          {/* Header Banner */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/20 pb-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 rounded-2xl bg-white text-emerald-700 flex items-center justify-center text-2xl shadow-lg">
+                <Phone className="w-6 h-6 animate-bounce" />
+              </div>
+              <div>
+                <span className="text-[11px] font-extrabold uppercase tracking-widest text-emerald-200 block">
+                  {lang === 'am' ? 'የደዋይ ተሳፋሪ መረጃ' : 'INCOMING PASSENGER CALL'}
+                </span>
+                <h2 className="text-2xl sm:text-3xl font-extrabold font-['Outfit']">
+                  {activeTrip.passengerName}
+                </h2>
+              </div>
+            </div>
+
+            {/* Direct 1-Tap Call to Passenger */}
+            <a
+              href={`tel:${activeTrip.passengerPhone}`}
+              className="px-5 py-3 rounded-2xl bg-white hover:bg-emerald-50 text-emerald-800 font-extrabold text-sm flex items-center space-x-2 shadow-xl cursor-pointer"
+            >
+              <Phone className="w-4 h-4 text-emerald-600" />
+              <span>{lang === 'am' ? 'ደውልለት' : 'Call Caller'}: {activeTrip.passengerPhone}</span>
+            </a>
+          </div>
+
+          {/* Caller Route Details */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            
+            {/* Pickup Location */}
+            <div className="p-4 rounded-2xl bg-emerald-900/60 border border-emerald-400/40 space-y-1">
+              <div className="flex items-center space-x-2 text-emerald-300 text-xs font-bold">
+                <MapPin className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>{lang === 'am' ? 'የመነሻ ቦታ (Pickup)' : 'PICKUP LOCATION'}</span>
+              </div>
+              <p className="text-lg font-bold text-white font-['Outfit']">
+                {activeTrip.pickupAddress}
+              </p>
+              <span className="text-xs text-emerald-200 block">
+                {lang === 'am' ? 'ወረዳ፡' : 'District:'} <b>{activeTrip.districtName || 'Village Zone'}</b>
+              </span>
+            </div>
+
+            {/* Dropoff Destination */}
+            <div className="p-4 rounded-2xl bg-emerald-900/60 border border-emerald-400/40 space-y-1">
+              <div className="flex items-center space-x-2 text-emerald-300 text-xs font-bold">
+                <Navigation className="w-4 h-4 text-emerald-300 shrink-0" />
+                <span>{lang === 'am' ? 'የመድረሻ ቦታ (Destination)' : 'DESTINATION'}</span>
+              </div>
+              <p className="text-lg font-bold text-white font-['Outfit']">
+                {activeTrip.dropoffAddress}
+              </p>
+              <span className="text-xs text-emerald-200 block">
+                {lang === 'am' ? 'ርቀት፡' : 'Distance:'} <b>{activeTrip.distanceKm.toFixed(1)} KM</b>
+              </span>
+            </div>
+
+          </div>
+
+          {/* Quick Stats: Fare, Passenger Count, KM Cost */}
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="p-3 bg-emerald-900/50 rounded-2xl border border-emerald-400/30">
+              <span className="text-[11px] text-emerald-200 block">{lang === 'am' ? 'የሚገመት ክፍያ' : 'Est. Fare'}</span>
+              <span className="font-bold text-xl font-mono text-amber-300">{activeTrip.estimatedFare} Br</span>
+            </div>
+
+            <div className="p-3 bg-emerald-900/50 rounded-2xl border border-emerald-400/30">
+              <span className="text-[11px] text-emerald-200 block">{lang === 'am' ? 'የተሳፋሪ ብዛት' : 'Passengers'}</span>
+              <span className="font-bold text-base flex items-center justify-center gap-1 mt-0.5">
+                <Users className="w-4 h-4 text-emerald-300" />
+                <span>{activeTrip.passengerCount || 1}</span>
+                {activeTrip.hasLuggage && <Briefcase className="w-3.5 h-3.5 text-amber-300 ml-1" />}
+              </span>
+            </div>
+
+            <div className="p-3 bg-emerald-900/50 rounded-2xl border border-emerald-400/30">
+              <span className="text-[11px] text-emerald-200 block">{lang === 'am' ? 'ከባላንስ የሚቀነስ' : 'KM Cost'}</span>
+              <span className="font-bold text-base text-rose-300 font-mono">-{activeTrip.distanceKm.toFixed(1)} KM</span>
+            </div>
+          </div>
+
+          {errorMessage && (
+            <div className="p-3 rounded-2xl bg-rose-900/80 border border-rose-400 text-white font-bold text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {/* Big Action Buttons: Accept or Ignore */}
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+            <button
+              onClick={handleQuickAccept}
+              disabled={isAccepting}
+              className="flex-1 py-4 rounded-2xl bg-white hover:bg-emerald-50 text-emerald-800 font-extrabold text-lg shadow-2xl transition-transform active:scale-98 flex items-center justify-center space-x-2 cursor-pointer font-['Outfit']"
+            >
+              <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+              <span>{isAccepting ? (lang === 'am' ? 'በመቀበል ላይ...' : 'Accepting...') : (lang === 'am' ? 'ጥሪውን ተቀበል / ACCEPT' : 'ACCEPT RIDE NOW')}</span>
+            </button>
+          </div>
+
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ACTIVE ACCEPTED TRIP MANAGEMENT CARD WITH FULL CALLER DETAILS */}
+      {/* ========================================================================= */}
       {isMyActiveTrip && activeTrip && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-emerald-500 shadow-xl space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border-2 border-emerald-500 shadow-xl space-y-6">
+          
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
             <div className="flex items-center space-x-3">
               <div className="p-3 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 rounded-2xl">
                 <Car className="w-6 h-6" />
@@ -424,84 +635,116 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-600 dark:text-emerald-400 block">
                   {lang === 'am' ? 'ገባሪ የኮንትራት ጉዞ' : 'Active Contract in Progress'}
                 </span>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white font-['Outfit']">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white font-['Outfit']">
                   {activeTrip.pickupAddress} → {activeTrip.dropoffAddress}
                 </h3>
               </div>
             </div>
 
+            {/* Direct Call Button */}
             <a
               href={`tel:${activeTrip.passengerPhone}`}
-              className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs flex items-center space-x-2 shadow-md shadow-emerald-500/20"
+              className="px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center space-x-2 shadow-md shadow-emerald-500/20"
             >
               <Phone className="w-4 h-4" />
-              <span>{t(lang, 'callPassenger')}</span>
+              <span>{t(lang, 'callPassenger')}: {activeTrip.passengerPhone}</span>
             </a>
           </div>
 
+          {/* Caller Details Card Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
-              <span className="text-slate-400 block text-[10px] uppercase font-bold">Passenger</span>
-              <span className="font-bold text-slate-900 dark:text-white text-sm">{activeTrip.passengerName}</span>
-              <span className="block text-xs font-mono text-slate-500">{activeTrip.passengerPhone}</span>
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-1">
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">
+                {lang === 'am' ? 'የደዋይ ተሳፋሪ ስም' : 'Passenger Name'}
+              </span>
+              <span className="font-bold text-slate-900 dark:text-white text-base block">{activeTrip.passengerName}</span>
+              <span className="block text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold">{activeTrip.passengerPhone}</span>
             </div>
 
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
-              <span className="text-slate-400 block text-[10px] uppercase font-bold">Contract Distance</span>
-              <span className="font-bold text-slate-900 dark:text-white text-sm">{activeTrip.distanceKm.toFixed(1)} KM</span>
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-1">
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">
+                {lang === 'am' ? 'የጉዞ ርቀት' : 'Trip Distance'}
+              </span>
+              <span className="font-bold text-slate-900 dark:text-white text-base block">{activeTrip.distanceKm.toFixed(1)} KM</span>
               <span className="block text-[11px] text-slate-500">{activeTrip.districtName}</span>
             </div>
 
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800">
-              <span className="text-slate-400 block text-[10px] uppercase font-bold">Fare Settlement</span>
-              <span className="font-bold text-emerald-600 dark:text-emerald-400 text-sm font-mono">
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-1">
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">
+                {lang === 'am' ? 'የክፍያ ሂሳብ' : 'Fare Amount'}
+              </span>
+              <span className="font-bold text-emerald-600 dark:text-emerald-400 text-lg font-mono block">
                 {activeTrip.agreedFare || activeTrip.estimatedFare} Br
               </span>
-              <span className="block text-[10px] text-slate-400">Direct Passenger Settlement</span>
+              <span className="block text-[10px] text-slate-400">{lang === 'am' ? '100% የእርስዎ ገቢ' : '100% Driver Fare'}</span>
             </div>
           </div>
 
-          {/* Trip Progress State Controller */}
+          {/* Status Progression Workflow */}
           <div className="flex flex-wrap items-center gap-3 pt-2">
             {activeTrip.status === 'accepted' && (
               <button
                 onClick={() => onUpdateTripStatus(activeTrip.id, 'en_route')}
-                className="flex-1 py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs sm:text-sm rounded-xl hover:bg-slate-800 transition-colors"
+                className="flex-1 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-2xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
               >
-                {lang === 'am' ? 'ወደ ተሳፋሪው እየሄድኩ ነው' : 'Heading to Pickup Location →'}
+                <Navigation className="w-4 h-4" />
+                <span>{lang === 'am' ? '1. ወደ ተሳፋሪው እየሄድኩ ነው (En Route)' : '1. Heading to Pickup Location →'}</span>
               </button>
             )}
 
             {activeTrip.status === 'en_route' && (
               <button
                 onClick={() => onUpdateTripStatus(activeTrip.id, 'arrived')}
-                className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs sm:text-sm rounded-xl transition-colors"
+                className="flex-1 py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm rounded-2xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
               >
-                {lang === 'am' ? 'ተሳፋሪው በር ላይ ደርሻለሁ' : 'I Have Arrived at Doorstep'}
+                <MapPin className="w-4 h-4" />
+                <span>{lang === 'am' ? '2. ተሳፋሪው በር ላይ ደርሻለሁ (Arrived)' : '2. Arrived at Passenger Doorstep'}</span>
               </button>
             )}
 
             {activeTrip.status === 'arrived' && (
               <div className="flex-1 flex flex-col sm:flex-row items-center gap-3">
-                <input
-                  type="number"
-                  placeholder="Final Agreed Fare (Br)"
-                  value={negotiatedPrice}
-                  onChange={(e) => setNegotiatedPrice(e.target.value)}
-                  className="w-full sm:w-48 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono"
-                />
+                <div className="w-full sm:w-56 space-y-1">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                    {lang === 'am' ? 'የተስማማችሁት ዋጋ (ብር)' : 'Agreed Fare (Br)'}
+                  </label>
+                  <input
+                    type="number"
+                    placeholder={String(activeTrip.estimatedFare)}
+                    value={negotiatedPrice}
+                    onChange={(e) => setNegotiatedPrice(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-mono font-bold"
+                  />
+                </div>
+
                 <button
                   onClick={() => {
                     const price = negotiatedPrice ? parseFloat(negotiatedPrice) : activeTrip.estimatedFare;
                     onUpdateTripStatus(activeTrip.id, 'completed', price);
                   }}
-                  className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-emerald-500/20"
+                  className="w-full sm:flex-1 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm rounded-2xl shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all"
                 >
-                  {t(lang, 'completeTrip')}
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span>{lang === 'am' ? '3. ጉዞው ተጠናቋል (ክፍያ ተቀብያለሁ)' : '3. Complete Trip & Collect Fare'}</span>
                 </button>
               </div>
             )}
+
+            {/* Driver Cancel / Release Trip Button */}
+            {onCancelTrip && (
+              <button
+                type="button"
+                id="btn-driver-cancel-trip"
+                onClick={() => setIsDriverCancelModalOpen(true)}
+                className="px-4 py-3.5 rounded-2xl border border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                title="Cancel and release this ride"
+              >
+                <XCircle className="w-4 h-4" />
+                <span>{lang === 'am' ? 'ጉዞውን ሰርዝ' : 'Cancel Ride'}</span>
+              </button>
+            )}
           </div>
+
         </div>
       )}
 
@@ -529,6 +772,128 @@ export const DriverView: React.FC<DriverViewProps> = ({
           heightClass="h-72 sm:h-96"
         />
       </div>
+
+      {/* Recharge Modal */}
+      {currentDriver && (
+        <DriverRechargeModal
+          isOpen={isRechargeModalOpen}
+          onClose={() => setIsRechargeModalOpen(false)}
+          driver={currentDriver}
+          settings={settings}
+          lang={lang}
+          colorTheme={colorTheme}
+        />
+      )}
+
+      {/* Driver Cancel Modal */}
+      {isDriverCancelModalOpen && activeTrip && onCancelTrip && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-5 animate-in zoom-in-95">
+            
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center text-xl shrink-0">
+                  <XCircle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 dark:text-white text-base font-['Outfit']">
+                    {lang === 'am' ? 'ጉዞውን መሰረዝ ይፈልጋሉ?' : 'Cancel Active Trip?'}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {lang === 'am' ? 'ጉዞውን ከሰረዙ ጥሪው እንደገና ለሌሎች ባጃጆች ክፍት ይሆናል ወይም ይሰረዛል።' : 'Cancelling will release the ride back or abort the dispatch request.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDriverCancelModalOpen(false)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Select Driver Cancellation Reason */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                {lang === 'am' ? 'የመሰረዣ ምክንያት ይምረጡ' : 'Reason for Cancellation'}
+              </label>
+
+              <div className="space-y-2">
+                {[
+                  {
+                    key: 'no_show',
+                    label: lang === 'am' ? 'ተሳፋሪው አልተገኘም / ስልክ አያነሳም' : 'Passenger did not show up / unreachable'
+                  },
+                  {
+                    key: 'breakdown',
+                    label: lang === 'am' ? 'የባጃጅ ብልሽት / የቴክኒክ ችግር' : 'Bajaj mechanical issue or breakdown'
+                  },
+                  {
+                    key: 'passenger_cancelled',
+                    label: lang === 'am' ? 'ተሳፋሪው በቃል እንደሰረዘው ነገረኝ' : 'Passenger verbally asked to cancel'
+                  },
+                  {
+                    key: 'other',
+                    label: lang === 'am' ? 'ሌላ ምክንያት' : 'Other reason'
+                  }
+                ].map((item) => (
+                  <label
+                    key={item.key}
+                    className={`flex items-center space-x-2.5 p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                      driverCancelReason === item.label
+                        ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-400 text-rose-900 dark:text-rose-200 font-bold'
+                        : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="driver_cancel_reason"
+                      value={item.label}
+                      checked={driverCancelReason === item.label}
+                      onChange={() => setDriverCancelReason(item.label)}
+                      className="text-rose-500 focus:ring-rose-400"
+                    />
+                    <span>{item.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsDriverCancelModalOpen(false)}
+                className="flex-1 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition-colors cursor-pointer text-center"
+              >
+                {lang === 'am' ? 'ተመለስ (ጉዞውን ቀጥል)' : 'Go Back (Keep Trip)'}
+              </button>
+
+              <button
+                type="button"
+                disabled={isCancellingTrip}
+                onClick={async () => {
+                  setIsCancellingTrip(true);
+                  try {
+                    await onCancelTrip(activeTrip.id, driverCancelReason, 'driver');
+                    setIsDriverCancelModalOpen(false);
+                  } catch (err) {
+                    console.error(err);
+                  } finally {
+                    setIsCancellingTrip(false);
+                  }
+                }}
+                className="flex-1 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-rose-600/20 transition-all cursor-pointer text-center flex items-center justify-center space-x-1.5"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span>{isCancellingTrip ? (lang === 'am' ? 'እየተሰረዘ ነው...' : 'Cancelling...') : (lang === 'am' ? 'አዎ፣ ጉዞውን ሰርዝ' : 'Yes, Cancel Trip')}</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );

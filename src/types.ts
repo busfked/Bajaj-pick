@@ -1,6 +1,7 @@
 export type AppRole = 'passenger' | 'driver' | 'admin' | 'driver_register';
 export type AppLanguage = 'en' | 'am';
 export type AppTheme = 'light' | 'dark';
+export type ColorTheme = 'emerald' | 'amber' | 'blue' | 'purple' | 'rose' | 'slate';
 export type DriverRingtoneOption = 'bajaj_voice' | 'village_chime' | 'subtle_pulse';
 
 export interface LocationCoord {
@@ -30,6 +31,23 @@ export interface VillageDistrict {
   suspendedReason?: string;
 }
 
+export interface DriverRechargeRequest {
+  id: string;
+  driverId: string;
+  driverName: string;
+  driverPhone: string;
+  driverPlate: string;
+  amountBirr: number; // e.g. 100 Birr
+  kmToCredit: number; // 15 KM per 100 Birr
+  paymentMethod: 'telebirr' | 'cbe' | 'awash' | 'cash';
+  receiptScreenshotUrl: string; // Screenshot proof
+  transactionReference?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
+  reviewedAt?: number;
+  rejectionReason?: string;
+}
+
 export interface BajajDriver {
   id: string;
   name: string;
@@ -44,16 +62,16 @@ export interface BajajDriver {
   currentLocation: LocationCoord;
   isOnline: boolean;
   isRegistered: boolean;
-  isApproved: boolean; // Admin approval flag
-  approvalStatus: 'pending' | 'approved' | 'rejected';
-  registrationFeeAmount: number; // 1000 ETB
-  registrationFeePaid: boolean;
-  paymentReceiptPhotoUrl?: string; // 1000 Birr payment screenshot
-  rejectionReason?: string;
   
-  // Full ID & Verification Data
+  // Mileage / KM Credit Balance (100 Birr = 15 KM credit)
+  kmBalance: number; // Available KM for receiving calls & driving
+  totalKmPurchased: number;
+  totalKmDriven: number;
+  lastRechargeDate?: string;
+  
+  // Full ID & Verification Data (Optional for simple registration)
   nationalIdNumber?: string;
-  nationalIdPhotoUrl?: string; // National ID image card
+  nationalIdPhotoUrl?: string;
   faydaNumber?: string;
   kebeleHouseNumber?: string;
   emergencyContactName?: string;
@@ -63,14 +81,19 @@ export interface BajajDriver {
   annualCommissionRatePercent: number; // 2%
   totalTripsCompleted: number;
   totalEstimatedEarnings: number; // Total volume in ETB
-  annualCommissionDue: number; // 2% of totalEstimatedEarnings
+  annualCommissionDue: number;
   annualCommissionPaid: boolean;
-  annualSettlementYear: number; // e.g. 2026
+  annualSettlementYear: number;
   lastAnnualPaymentDate?: string;
+
+  // Approval & Verification by Village Coordinator
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  reviewedAt?: number;
+  rejectionReason?: string;
 
   registrationDate: string;
   rating: number;
-  photoUrl?: string; // Cropped profile image from ID / camera
+  photoUrl?: string;
   activeTripId?: string | null;
   lastActiveAt?: number;
 }
@@ -95,9 +118,11 @@ export interface ContractTrip {
   suggestedNegotiationMax: number;
   currency: string;
   status: 'ringing' | 'accepted' | 'en_route' | 'arrived' | 'completed' | 'cancelled' | 'expired';
+  cancelledBy?: 'passenger' | 'driver' | 'admin' | 'system';
+  cancellationReason?: string;
   createdAt: number;
   ringingExpiresAt: number; // 120s (2 minutes)
-  targetDriverIds: string[]; // Online drivers within <= 3km in district
+  targetDriverIds: string[]; // Online drivers within <= 3km in district with kmBalance > 0
   acceptedByDriverId?: string;
   acceptedDriver?: BajajDriver;
   acceptedAt?: number;
@@ -111,12 +136,19 @@ export interface VillageSettings {
   districts: VillageDistrict[];
   currency: string;
   currencySymbol: string;
+  adminEmail: string; // busfkedmurdu21@gmail.com
+  adminPhone: string;
+  kmRateBirrPer15Km: number; // Default 100 Birr for 15 KM
   annualCommissionPercent: number; // default 2%
   maxDispatchRangeKm: number; // default 3.0 km
   ringTimeoutSeconds: number; // default 120s (2 minutes)
-  adminPassword: string; // e.g. 'admin123'
-  supportPhone: string; // Editable anytime
-  supportEmail: string; // Editable anytime
+  adminPassword?: string;
+  supportPhone: string;
+  supportEmail: string;
+  telebirrAccount: string;
+  cbeAccount: string;
+  awashAccount: string;
+  accountHolderName: string;
   baseContractFare: number;
   ratePerKm: number;
   villageCenter: LocationCoord;
@@ -140,7 +172,9 @@ export interface DriverRegistrationForm {
   modelYear?: string;
   emergencyContactName?: string;
   emergencyContactPhone?: string;
-  paymentReceiptPhotoUrl?: string; // 1000 Birr payment screenshot
+  initialRechargeBirr?: number; // Optional initial mileage recharge (e.g. 100 Birr)
+  receiptScreenshotUrl?: string; // Optional payment screenshot
 }
+
 
 

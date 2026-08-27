@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   BajajDriver, 
   ContractTrip, 
   VillageSettings, 
   VillageDistrict,
   DriverRegistrationForm,
-  AppLanguage 
+  DriverRechargeRequest,
+  AppLanguage,
+  ColorTheme
 } from '../types';
 import { 
   ShieldCheck, 
@@ -42,51 +44,95 @@ import {
   KeyRound,
   AlertTriangle,
   PauseCircle,
-  PlayCircle
+  PlayCircle,
+  Gauge,
+  PlusCircle,
+  MinusCircle,
+  LogOut,
+  ExternalLink,
+  Image as ImageIcon,
+  Edit3,
+  CheckCheck,
+  Shield,
+  CheckCircle,
+  X,
+  RotateCcw,
+  AlertCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ImageCropModal } from './ImageCropModal';
 import { t } from '../utils/translations';
+import { COLOR_THEMES } from '../utils/colors';
 
 interface AdminDashboardProps {
   settings: VillageSettings;
   drivers: BajajDriver[];
   trips: ContractTrip[];
+  recharges?: DriverRechargeRequest[];
   onUpdateSettings: (newSettings: Partial<VillageSettings>) => Promise<void>;
   onResetDemo: () => void;
   onAddDriver?: (data: DriverRegistrationForm) => Promise<boolean>;
+  onUpdateDriver?: (driverId: string, updatedData: Partial<BajajDriver>) => Promise<void>;
   onRemoveDriver?: (driverId: string) => Promise<void>;
   onAddDistrict?: (districtData: Partial<VillageDistrict>) => Promise<void>;
   onDeleteDistrict?: (districtId: string) => Promise<void>;
   onSettleAnnualFee?: (driverId: string) => Promise<void>;
+  onExitAdmin?: () => void;
   lang?: AppLanguage;
+  colorTheme?: ColorTheme;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   settings,
   drivers,
   trips,
+  recharges: initialRecharges = [],
   onUpdateSettings,
   onResetDemo,
   onAddDriver,
+  onUpdateDriver,
   onRemoveDriver,
   onAddDistrict,
   onDeleteDistrict,
   onSettleAnnualFee,
+  onExitAdmin,
   lang = 'en',
+  colorTheme = 'emerald',
 }) => {
-  // Password Lock Screen State
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [passwordInput, setPasswordInput] = useState('');
-  const [passwordError, setPasswordError] = useState<string | null>(null);
+  // Check session authorization
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return sessionStorage.getItem('bajaj_admin_authenticated') === 'true';
+  });
+
+  // Recharges list state
+  const [rechargesList, setRechargesList] = useState<DriverRechargeRequest[]>(initialRecharges);
+  const [selectedScreenshotUrl, setSelectedScreenshotUrl] = useState<string | null>(null);
 
   // Active Sub-Tab
-  const [activeTab, setActiveTab] = useState<'fleet' | 'districts' | 'annual_fees' | 'promotion' | 'settings' | 'trips'>('fleet');
+  const [activeTab, setActiveTab] = useState<'recharges' | 'driver_approvals' | 'fleet' | 'districts' | 'annual_fees' | 'settings' | 'promotion'>('recharges');
   const [districtFilter, setDistrictFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Driver Approval & Rejection State
+  const [selectedRejectDriver, setSelectedRejectDriver] = useState<BajajDriver | null>(null);
+  const [rejectReasonInput, setRejectReasonInput] = useState<string>('ID / Fayda photo is blurry or unreadable');
+  const [customRejectNote, setCustomRejectNote] = useState<string>('');
+  const [isProcessingDriverApproval, setIsProcessingDriverApproval] = useState(false);
+
   // Driver Full ID Dossier Modal
   const [selectedDriverDossier, setSelectedDriverDossier] = useState<BajajDriver | null>(null);
+
+  // Driver KM adjustment modal
+  const [adjustKmDriver, setAdjustKmDriver] = useState<BajajDriver | null>(null);
+  const [kmAdjustAmount, setKmAdjustAmount] = useState<string>('15');
+  const [isAdjustingKm, setIsAdjustingKm] = useState(false);
+
+  // Edit Driver Modal State
+  const [isEditDriverModalOpen, setIsEditDriverModalOpen] = useState(false);
+  const [editingDriver, setEditingDriver] = useState<BajajDriver | null>(null);
+  const [editDriverData, setEditDriverData] = useState<Partial<BajajDriver>>({});
+  const [isSavingDriver, setIsSavingDriver] = useState(false);
+  const [quickDistrictChangingId, setQuickDistrictChangingId] = useState<string | null>(null);
 
   // Add Bajaj Modal State
   const [isAddDriverModalOpen, setIsAddDriverModalOpen] = useState(false);
@@ -123,75 +169,235 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newDistrictLng, setNewDistrictLng] = useState('38.8020');
   const [newDistrictRadius, setNewDistrictRadius] = useState('3.0');
 
-  // Change Password State
-  const [currentPassInput, setCurrentPassInput] = useState('');
-  const [newPassInput, setNewPassInput] = useState('');
-  const [confirmPassInput, setConfirmPassInput] = useState('');
-  const [passChangeSuccess, setPassChangeSuccess] = useState<string | null>(null);
-  const [passChangeError, setPassChangeError] = useState<string | null>(null);
-
   // Settings State
   const [villageName, setVillageName] = useState(settings.villageName);
   const [supportPhone, setSupportPhone] = useState(settings.supportPhone);
-  const [supportEmail, setSupportEmail] = useState(settings.supportEmail || 'coordinator@villagebajaj.et');
-  const [annualCommissionPercent, setAnnualCommissionPercent] = useState(settings.annualCommissionPercent || 2);
-  const [baseContractFare, setBaseContractFare] = useState(settings.baseContractFare || 40);
-  const [ratePerKm, setRatePerKm] = useState(settings.ratePerKm || 20);
+  const [supportEmail, setSupportEmail] = useState(settings.supportEmail || 'busfkedmurdu21@gmail.com');
+  const [adminPhone, setAdminPhone] = useState(settings.adminPhone || '0911234567');
+  const [telebirrAccount, setTelebirrAccount] = useState(settings.adminPaymentAccounts?.telebirr || '0911234567');
+  const [cbeAccount, setCbeAccount] = useState(settings.adminPaymentAccounts?.cbe || '1000123456789');
+  const [awashAccount, setAwashAccount] = useState(settings.adminPaymentAccounts?.awash || '0142345678900');
+  const [kmRateBirr, setKmRateBirr] = useState(settings.kmRateBirrPer15Km || 100);
   const [settingsSavedMsg, setSettingsSavedMsg] = useState(false);
 
-  // Handle Login Check
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordError(null);
+  const activeColor = COLOR_THEMES[colorTheme] || COLOR_THEMES.emerald;
+
+  // Poll recharges
+  const fetchRecharges = async () => {
     try {
-      const res = await fetch('/api/admin/verify-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: passwordInput }),
-      });
+      const res = await fetch('/api/recharges');
       if (res.ok) {
-        setIsAuthenticated(true);
-        setPasswordInput('');
-      } else {
-        setPasswordError(lang === 'am' ? 'የተሳሳተ የይለፍ ቃል' : 'Incorrect Admin Password');
+        const data = await res.json();
+        if (data.recharges) {
+          setRechargesList(data.recharges);
+        }
       }
     } catch {
-      setPasswordError(lang === 'am' ? 'ስህተት ተከስቷል' : 'Authentication failed');
+      // Ignore
     }
   };
 
-  // Handle Password Change
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPassChangeError(null);
-    setPassChangeSuccess(null);
+  useEffect(() => {
+    fetchRecharges();
+    const interval = setInterval(fetchRecharges, 2500);
+    return () => clearInterval(interval);
+  }, []);
 
-    if (newPassInput !== confirmPassInput) {
-      setPassChangeError(lang === 'am' ? 'አዲሱ የይለፍ ቃል አይመሳሰልም' : 'New passwords do not match');
-      return;
-    }
-
+  // Handle Approve Recharge
+  const handleApproveRecharge = async (rechargeId: string) => {
     try {
-      const res = await fetch('/api/admin/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          currentPassword: currentPassInput,
-          newPassword: newPassInput,
-        }),
-      });
-      const data = await res.json();
+      const res = await fetch(`/api/recharges/${rechargeId}/approve`, { method: 'POST' });
       if (res.ok) {
-        setPassChangeSuccess(lang === 'am' ? 'የይለፍ ቃሉ በተሳካ ሁኔታ ተቀይሯል!' : 'Admin password successfully updated!');
-        setCurrentPassInput('');
-        setNewPassInput('');
-        setConfirmPassInput('');
-        setTimeout(() => setPassChangeSuccess(null), 4000);
-      } else {
-        setPassChangeError(data.error || 'Failed to update password');
+        confetti({ particleCount: 100, spread: 70 });
+        await fetchRecharges();
+        onResetDemo();
       }
     } catch {
-      setPassChangeError('Network error updating password');
+      // Ignore
+    }
+  };
+
+  // Handle Reject Recharge
+  const handleRejectRecharge = async (rechargeId: string) => {
+    const reason = window.prompt(lang === 'am' ? 'የውድቅ ማድረጊያ ምክንያት ያስገቡ፡' : 'Enter rejection reason:', 'Unclear screenshot / Transaction not found');
+    if (reason === null) return;
+
+    try {
+      const res = await fetch(`/api/recharges/${rechargeId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      if (res.ok) {
+        await fetchRecharges();
+        onResetDemo();
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  // Handle Adjust Driver KM
+  const handleAdjustDriverKm = async () => {
+    if (!adjustKmDriver) return;
+    setIsAdjustingKm(true);
+    try {
+      const amount = parseFloat(kmAdjustAmount) || 0;
+      const res = await fetch(`/api/drivers/${adjustKmDriver.id}/adjust-km`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountKm: amount }),
+      });
+      if (res.ok) {
+        setAdjustKmDriver(null);
+        setKmAdjustAmount('15');
+        confetti({ particleCount: 60, spread: 50 });
+        onResetDemo();
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setIsAdjustingKm(false);
+    }
+  };
+
+  // Approve Driver Registration (Activate + 15 KM Starter Credit)
+  const handleApproveDriver = async (driverId: string) => {
+    setIsProcessingDriverApproval(true);
+    try {
+      const res = await fetch(`/api/admin/drivers/${driverId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        confetti({ particleCount: 90, spread: 70 });
+        onResetDemo();
+      }
+    } catch (err) {
+      console.error('Error approving driver:', err);
+    } finally {
+      setIsProcessingDriverApproval(false);
+    }
+  };
+
+  // Reject Driver Registration with Clear Feedback
+  const handleRejectDriver = async (driverId: string) => {
+    setIsProcessingDriverApproval(true);
+    const finalReason = rejectReasonInput === 'Other Reason' && customRejectNote.trim()
+      ? customRejectNote.trim()
+      : rejectReasonInput;
+
+    try {
+      const res = await fetch(`/api/admin/drivers/${driverId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: finalReason }),
+      });
+      if (res.ok) {
+        setSelectedRejectDriver(null);
+        setCustomRejectNote('');
+        onResetDemo();
+      }
+    } catch (err) {
+      console.error('Error rejecting driver:', err);
+    } finally {
+      setIsProcessingDriverApproval(false);
+    }
+  };
+
+  // Open Comprehensive Edit Driver Modal
+  const handleOpenEditDriver = (driver: BajajDriver) => {
+    setEditingDriver(driver);
+    setEditDriverData({
+      name: driver.name,
+      phone: driver.phone,
+      secondaryPhone: driver.secondaryPhone || '',
+      bajajPlate: driver.bajajPlate,
+      bajajColor: driver.bajajColor || 'Yellow & Black',
+      modelYear: driver.modelYear || '2024 TVS King',
+      districtId: driver.districtId,
+      districtName: driver.districtName,
+      villageArea: driver.villageArea || '',
+      nationalIdNumber: driver.nationalIdNumber || '',
+      faydaNumber: driver.faydaNumber || '',
+      kebeleHouseNumber: driver.kebeleHouseNumber || '',
+      emergencyContactName: driver.emergencyContactName || '',
+      emergencyContactPhone: driver.emergencyContactPhone || '',
+      kmBalance: driver.kmBalance ?? 15,
+      rating: driver.rating || 5.0,
+      photoUrl: driver.photoUrl || '',
+      nationalIdPhotoUrl: driver.nationalIdPhotoUrl || '',
+      isOnline: driver.isOnline,
+      isRegistered: driver.isRegistered,
+    });
+    setIsEditDriverModalOpen(true);
+  };
+
+  // Quick 1-Click Change Driver District
+  const handleQuickChangeDistrict = async (driverId: string, newDistrictId: string) => {
+    setQuickDistrictChangingId(driverId);
+    try {
+      const res = await fetch(`/api/drivers/${driverId}/change-district`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ districtId: newDistrictId }),
+      });
+      if (res.ok) {
+        confetti({ particleCount: 50, spread: 50 });
+        onResetDemo();
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setQuickDistrictChangingId(null);
+    }
+  };
+
+  // Save All Changes to Driver
+  const handleSaveEditDriver = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDriver) return;
+    setIsSavingDriver(true);
+    try {
+      const res = await fetch(`/api/drivers/${editingDriver.id}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editDriverData),
+      });
+      if (res.ok) {
+        setIsEditDriverModalOpen(false);
+        setEditingDriver(null);
+        confetti({ particleCount: 70, spread: 60 });
+        onResetDemo();
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setIsSavingDriver(false);
+    }
+  };
+
+  // Delete Driver with Prompt & Instant Purge
+  const handleDeleteDriver = async (driverId: string, driverName: string) => {
+    const confirmMsg = lang === 'am'
+      ? `አሽከርካሪውን '${driverName}' እና ሁሉንም መረጃዎች በቋሚነት መሰረዝ ይፈልጋሉ?`
+      : `Are you sure you want to permanently delete driver '${driverName}' and all associated mileage records?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const res = await fetch(`/api/drivers/${driverId}`, { method: 'DELETE' });
+      if (res.ok) {
+        if (onRemoveDriver) {
+          await onRemoveDriver(driverId);
+        }
+        if (isEditDriverModalOpen) {
+          setIsEditDriverModalOpen(false);
+          setEditingDriver(null);
+        }
+        onResetDemo();
+      }
+    } catch {
+      // Ignore
     }
   };
 
@@ -208,39 +414,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }),
       });
       if (res.ok) {
-        onResetDemo(); // triggers state refresh
+        onResetDemo();
       }
     } catch {
       // Ignore
     }
   };
 
-  // Handle Save Support Phone & Email
+  // Handle Save Settings
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     await onUpdateSettings({
       villageName,
       supportPhone,
       supportEmail,
-      annualCommissionPercent: Number(annualCommissionPercent),
-      baseContractFare: Number(baseContractFare),
-      ratePerKm: Number(ratePerKm),
+      adminPhone,
+      kmRateBirrPer15Km: Number(kmRateBirr),
+      adminPaymentAccounts: {
+        telebirr: telebirrAccount,
+        cbe: cbeAccount,
+        awash: awashAccount,
+      },
     });
     setSettingsSavedMsg(true);
     setTimeout(() => setSettingsSavedMsg(false), 3000);
-  };
-
-  // Handle Clear All Data (Fresh Blank Start)
-  const handleClearAllData = async () => {
-    if (!window.confirm(lang === 'am' ? 'ሁሉንም የሙከራ ሾፌሮችና ጉዞዎች ማጽዳት ይፈልጋሉ?' : 'Are you sure you want to clear all data and start with 0 drivers?')) return;
-    try {
-      const res = await fetch('/api/admin/reset-clean', { method: 'POST' });
-      if (res.ok) {
-        onResetDemo();
-      }
-    } catch {
-      // Ignore
-    }
   };
 
   // Handle Add Driver Submit
@@ -317,63 +514,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Password Gate
-  if (!isAuthenticated) {
-    return (
-      <div className="max-w-md mx-auto px-4 py-16">
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl text-center space-y-6">
-          <div className="w-16 h-16 rounded-2xl bg-slate-900 dark:bg-slate-950 text-emerald-400 mx-auto flex items-center justify-center text-2xl shadow-inner border border-slate-800">
-            <Lock className="w-7 h-7" />
-          </div>
+  // Pending Recharges count
+  const pendingRecharges = rechargesList.filter(r => r.status === 'pending');
 
-          <div className="space-y-1.5">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white font-['Outfit']">
-              {t(lang, 'adminLocked')}
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {lang === 'am'
-                ? 'የመንደር አስተባባሪ የይለፍ ቃልዎን ያስገቡ (መደበኛ፡ admin)'
-                : 'Enter your coordinator password to access admin controls (default: admin)'}
-            </p>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-1 text-left">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                {lang === 'am' ? 'የአስተዳዳሪ የይለፍ ቃል' : 'Admin Password'}
-              </label>
-              <input
-                type="password"
-                required
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 outline-hidden"
-              />
-            </div>
-
-            {passwordError && (
-              <p className="text-xs font-bold text-red-500 text-left flex items-center space-x-1">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                <span>{passwordError}</span>
-              </p>
-            )}
-
-            <button
-              type="submit"
-              className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm shadow-md shadow-emerald-500/20 transition-all active:scale-98 cursor-pointer"
-            >
-              {lang === 'am' ? 'ክፈትና ግባ' : 'Unlock Dashboard'}
-            </button>
-          </form>
-
-          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400">
-            {lang === 'am' ? 'የይለፍ ቃልዎን በቅንብሮች ውስጥ መቀየር ይችላሉ' : 'You can change this password anytime in Admin Settings.'}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Pending & Rejected Drivers count
+  const pendingDrivers = drivers.filter(d => d.approvalStatus === 'pending');
+  const rejectedDrivers = drivers.filter(d => d.approvalStatus === 'rejected');
 
   // Filtered drivers list
   const filteredDrivers = drivers.filter((d) => {
@@ -387,22 +533,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-6 space-y-6">
       
+      {/* Top Back Navigation Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div className="flex items-center space-x-2">
+          {onExitAdmin && (
+            <button
+              type="button"
+              id="btn-admin-back-passenger"
+              onClick={onExitAdmin}
+              className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition-colors cursor-pointer"
+            >
+              <span>{lang === 'am' ? '← ወደ ተሳፋሪ ገጽ ተመለስ' : '← Back to Passenger Booking'}</span>
+            </button>
+          )}
+        </div>
+
+        <span className="text-xs font-semibold text-slate-400">
+          {lang === 'am' ? 'የአስተዳዳሪ እና አስተባባሪ ዳሽቦርድ' : 'Administrator & Coordinator Portal'}
+        </span>
+      </div>
+
       {/* Top Header Card */}
       <div className="bg-slate-900 dark:bg-slate-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1.5">
           <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-bold font-['Outfit']">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>{t(lang, 'adminUnlocked')}</span>
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{settings.adminEmail || 'busfkedmurdu21@gmail.com'} (Coordinator)</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white font-['Outfit']">
-            {settings.villageName}
+            {settings.villageName} Coordinator Panel
           </h1>
           <p className="text-slate-300 text-xs sm:text-sm">
             {lang === 'am'
-              ? 'የወረዳዎች ቁጥጥር፣ የባጃጅ ምዝገባ፣ የይለፍ ቃል ለውጥ እና የድጋፍ ስልክ/ኢሜይል አስተዳደር'
-              : 'District Boundaries, Driver ID Verification, Support Contacts & 2% Annual Settlements'}
+              ? 'የክፍያ ስክሪንሽቶች ማጽደቂያ (100 ብር = 15 KM)፣ የባጃጆች እና የወረዳዎች አስተዳደር'
+              : 'Payment Screenshot Approvals (100 Birr = 15 KM), Fleet Management & District Boundaries'}
           </p>
         </div>
 
@@ -416,11 +582,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
           
           <button
-            onClick={() => setIsAuthenticated(false)}
+            onClick={() => {
+              sessionStorage.removeItem('bajaj_admin_authenticated');
+              if (onExitAdmin) onExitAdmin();
+            }}
             className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-xs flex items-center space-x-1.5 border border-slate-700 transition-colors cursor-pointer"
           >
-            <Lock className="w-3.5 h-3.5" />
-            <span>Lock</span>
+            <LogOut className="w-3.5 h-3.5" />
+            <span>{lang === 'am' ? 'ውጣ' : 'Exit Admin'}</span>
           </button>
         </div>
       </div>
@@ -428,60 +597,502 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* Navigation Sub-Tabs */}
       <div className="flex items-center space-x-2 border-b border-slate-200 dark:border-slate-800 pb-2 overflow-x-auto">
         <button
+          onClick={() => setActiveTab('recharges')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'recharges'
+              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <DollarSign className="w-3.5 h-3.5" />
+          <span>{lang === 'am' ? 'የክፍያ ስክሪንሽቶች (100 ብር/15 KM)' : 'Payment Screenshots'}</span>
+          {pendingRecharges.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-rose-500 text-white font-bold animate-pulse ml-1">
+              {pendingRecharges.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('driver_approvals')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'driver_approvals'
+              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <Shield className="w-3.5 h-3.5" />
+          <span>{lang === 'am' ? 'የአሽከርካሪ ምዝገባዎች' : 'Driver Approvals'}</span>
+          {pendingDrivers.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500 text-white font-bold animate-pulse ml-1">
+              {pendingDrivers.length}
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab('fleet')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'fleet'
               ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          {t(lang, 'fleetRegistry')} ({drivers.length})
+          <Car className="w-3.5 h-3.5" />
+          <span>{t(lang, 'fleetRegistry')} ({drivers.length})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('districts')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'districts'
               ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          {t(lang, 'districtsTab')} ({settings.districts?.length || 0})
+          <MapPin className="w-3.5 h-3.5" />
+          <span>{t(lang, 'districtsTab')} ({settings.districts?.length || 0})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('annual_fees')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'annual_fees'
               ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          {t(lang, 'annualSettlementTab')}
+          <Percent className="w-3.5 h-3.5" />
+          <span>{t(lang, 'annualSettlementTab')}</span>
         </button>
 
         <button
           onClick={() => setActiveTab('settings')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'settings'
               ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          {t(lang, 'settingsTab')}
+          <Settings className="w-3.5 h-3.5" />
+          <span>{t(lang, 'settingsTab')}</span>
         </button>
 
         <button
           onClick={() => setActiveTab('promotion')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'promotion'
               ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          {t(lang, 'promotionTab')}
+          <Share2 className="w-3.5 h-3.5" />
+          <span>{t(lang, 'promotionTab')}</span>
         </button>
       </div>
+
+      {/* ================= TAB 0: RECHARGE APPROVALS (PAYMENT SCREENSHOTS) ================= */}
+      {activeTab === 'recharges' && (
+        <div className="space-y-4">
+          
+          <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white font-['Outfit']">
+                {lang === 'am' ? 'የሾፌሮች የክፍያ ስክሪንሽት ማረጋገጫ' : 'Driver Payment Proof Screenshots'}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {lang === 'am' 
+                  ? 'ሾፌሮች በቴሌብር ወይም በባንክ የላኩትን ስክሪንሽት አይተው በ1-ክሊክ ኪሎሜትር ባላንስ ይጨምሩ (100 ብር = 15 KM)' 
+                  : 'Review Telebirr/CBE receipts and approve 15 KM mileage credits with 1 click.'}
+              </p>
+            </div>
+            <button
+              onClick={fetchRecharges}
+              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer text-xs font-bold flex items-center gap-1"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>{lang === 'am' ? 'አድስ' : 'Refresh'}</span>
+            </button>
+          </div>
+
+          {rechargesList.length === 0 ? (
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-12 text-center border border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 mx-auto flex items-center justify-center">
+                <FileText className="w-6 h-6" />
+              </div>
+              <h4 className="font-bold text-slate-900 dark:text-white text-base">
+                {lang === 'am' ? 'ምንም የተላከ የክፍያ ስክሪንሽት የለም' : 'No Payment Requests Submitted Yet'}
+              </h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                {lang === 'am'
+                  ? 'ሾፌሮች ከስክሪናቸው ላይ 100 ብር (15 ኪ.ሜ) ሲሞሉና ስክሪንሽት ሲልኩ እዚህ ወዲያውኑ ይታያል።'
+                  : 'When drivers upload a Telebirr or bank screenshot to recharge their KM balance, it will appear here.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {rechargesList.map((rch) => {
+                const isPending = rch.status === 'pending';
+                return (
+                  <div
+                    key={rch.id}
+                    className={`bg-white dark:bg-slate-900 rounded-3xl p-5 border transition-all ${
+                      isPending
+                        ? 'border-amber-400 dark:border-amber-500 shadow-md ring-2 ring-amber-400/20'
+                        : 'border-slate-200 dark:border-slate-800 opacity-90'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-base text-slate-900 dark:text-white font-['Outfit']">
+                            {rch.driverName}
+                          </span>
+                          <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md font-bold">
+                            {rch.driverPlate || 'Bajaj'}
+                          </span>
+                        </div>
+                        <span className="text-xs text-slate-500 font-mono">{rch.driverPhone}</span>
+                      </div>
+
+                      <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase ${
+                        rch.status === 'approved'
+                          ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                          : rch.status === 'rejected'
+                            ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
+                            : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 animate-pulse'
+                      }`}>
+                        {rch.status}
+                      </span>
+                    </div>
+
+                    {/* Amount & KM Credit Details */}
+                    <div className="grid grid-cols-2 gap-2 my-3 text-xs">
+                      <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl">
+                        <span className="text-[10px] text-slate-400 block">{lang === 'am' ? 'የተከፈለ መጠን' : 'Amount Paid'}</span>
+                        <span className="font-bold text-base font-mono text-emerald-600 dark:text-emerald-400">
+                          {rch.amountBirr} Br
+                        </span>
+                      </div>
+                      <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl">
+                        <span className="text-[10px] text-slate-400 block">{lang === 'am' ? 'የሚጨመረው ኪ.ሜ' : 'KM Credit'}</span>
+                        <span className="font-bold text-base font-mono text-indigo-600 dark:text-indigo-400">
+                          +{rch.kmToCredit} KM
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Screenshot Thumbnail */}
+                    <div className="space-y-1.5 mb-4">
+                      <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                        <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>{lang === 'am' ? 'የክፍያ ስክሪንሽት ደረሰኝ (ጠቅ አድርገው ያሳድጉ)' : 'Payment Screenshot (Click to zoom)'}</span>
+                      </span>
+                      
+                      <div
+                        onClick={() => setSelectedScreenshotUrl(rch.receiptScreenshotUrl)}
+                        className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-950 aspect-16/9 flex items-center justify-center cursor-pointer group"
+                      >
+                        <img
+                          src={rch.receiptScreenshotUrl}
+                          alt="Receipt Proof"
+                          className="w-full h-full object-contain group-hover:scale-105 transition-transform"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-bold gap-1.5">
+                          <Eye className="w-4 h-4" />
+                          <span>View Full Proof</span>
+                        </div>
+                      </div>
+
+                      {rch.transactionReference && (
+                        <p className="text-[11px] font-mono text-slate-500">
+                          Ref: {rch.transactionReference}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    {isPending ? (
+                      <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          onClick={() => handleRejectRecharge(rch.id)}
+                          className="flex-1 py-2.5 rounded-xl border border-rose-200 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-950 text-rose-600 font-bold text-xs transition-colors cursor-pointer"
+                        >
+                          {lang === 'am' ? 'ውድቅ አድርግ' : 'Reject'}
+                        </button>
+                        <button
+                          onClick={() => handleApproveRecharge(rch.id)}
+                          className="flex-2 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>{lang === 'am' ? `አጽድቅ (+${rch.kmToCredit} KM ጨምር)` : `Approve & Credit +${rch.kmToCredit} KM`}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-slate-400 text-right">
+                        {rch.status === 'approved' ? '✓ Approved & credited to balance' : `✗ Rejected: ${rch.rejectionReason || ''}`}
+                      </div>
+                    )}
+
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* ================= TAB: DRIVER REGISTRATION APPROVALS ================= */}
+      {activeTab === 'driver_approvals' && (
+        <div className="space-y-6">
+          
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800">
+            <div>
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-amber-500" />
+                <h3 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit']">
+                  {lang === 'am' ? 'የአዲስ አሽከርካሪዎች ማመልከቻ ማረጋገጫ' : 'Driver Registration Approvals'}
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl">
+                {lang === 'am'
+                  ? 'አዳዲስ አሽከርካሪዎች ሲመዘገቡ መታወቂያቸውን እና የባጃጅ መረጃቸውን ይገምግሙ። ሲያጸድቁ 15 ኪ.ሜ የጅማሮ ክሬዲት ይሰጣቸዋል እንዲሁም ከህዝቡ የኮንትራት ጥሪዎችን መቀበል ይጀምራሉ።'
+                  : 'Review submitted driver applications and National IDs. Approving grants 15 KM starter balance and enables dispatch ringing alerts.'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-xs font-bold font-mono">
+                {pendingDrivers.length} {lang === 'am' ? 'በጥበቃ ላይ' : 'Pending'}
+              </span>
+            </div>
+          </div>
+
+          {/* Pending Applications Section */}
+          <div className="space-y-4">
+            <h4 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+              <span>{lang === 'am' ? `በጥበቃ ላይ ያሉ ማመልከቻዎች (${pendingDrivers.length})` : `Pending Review (${pendingDrivers.length})`}</span>
+            </h4>
+
+            {pendingDrivers.length === 0 ? (
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-10 text-center border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-500 mx-auto flex items-center justify-center">
+                  <CheckCircle className="w-6 h-6" />
+                </div>
+                <h4 className="font-bold text-slate-900 dark:text-white text-sm">
+                  {lang === 'am' ? 'ምንም ያልጸደቀ የአሽከርካሪ ማመልከቻ የለም' : 'No Pending Driver Applications'}
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                  {lang === 'am'
+                    ? 'አዳዲስ ሾፌሮች በስልካቸው ሲመዘገቡ ማመልከቻቸው፣ የመታወቂያ ፎቷቸው እና የታርጋ ቁጥራቸው እዚህ ማጽደቂያ ላይ ይታያል።'
+                    : 'When new Bajaj drivers register, their ID photos and vehicle documents will appear here for verification.'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {pendingDrivers.map((driver) => {
+                  return (
+                    <div
+                      key={driver.id}
+                      className="bg-white dark:bg-slate-900 rounded-3xl p-5 border-2 border-amber-400/80 dark:border-amber-500/80 shadow-md ring-4 ring-amber-400/10 space-y-4"
+                    >
+                      {/* Driver Card Header */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            onClick={() => setSelectedDriverDossier(driver)}
+                            className="w-14 h-14 rounded-2xl overflow-hidden border-2 border-amber-500 shrink-0 bg-slate-800 flex items-center justify-center cursor-pointer group relative"
+                          >
+                            {driver.photoUrl ? (
+                              <img src={driver.photoUrl} alt={driver.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <Car className="w-6 h-6 text-white" />
+                            )}
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                              <Eye className="w-4 h-4" />
+                            </div>
+                          </div>
+
+                          <div>
+                            <h4 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit'] flex items-center gap-1.5">
+                              <span>{driver.name}</span>
+                            </h4>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                                {driver.phone}
+                              </span>
+                              {driver.secondaryPhone && (
+                                <span className="text-xs font-mono text-slate-400">
+                                  / {driver.secondaryPhone}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 animate-pulse">
+                          ⏳ {lang === 'am' ? 'በጥበቃ ላይ' : 'Pending'}
+                        </span>
+                      </div>
+
+                      {/* District & Vehicle Details */}
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl">
+                          <span className="text-[10px] text-slate-400 block">{lang === 'am' ? 'ወረዳና ሰፈር' : 'District & Area'}</span>
+                          <span className="font-bold text-xs text-slate-900 dark:text-white truncate block">
+                            {driver.districtName}
+                          </span>
+                          <span className="text-[10px] text-slate-500 truncate block">
+                            {driver.villageArea || 'Central Stand'}
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl">
+                          <span className="text-[10px] text-slate-400 block">{lang === 'am' ? 'ታርጋና ሞዴል' : 'Plate & Model'}</span>
+                          <span className="font-bold text-xs font-mono text-slate-900 dark:text-white block">
+                            {driver.bajajPlate}
+                          </span>
+                          <span className="text-[10px] text-slate-500 block">
+                            {driver.bajajColor} • {driver.modelYear || '2024'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* IDs: National ID & Fayda */}
+                      <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-xs space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400">{lang === 'am' ? 'መታወቂያ / ፋይዳ' : 'ID / Fayda / Kebele'}</span>
+                          <span className="font-mono text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            {driver.nationalIdNumber || driver.faydaNumber || 'ID on file'}
+                          </span>
+                        </div>
+                        {driver.emergencyContactName && (
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-200 dark:border-slate-700 text-[10px] text-slate-500">
+                            <span>{lang === 'am' ? 'ተጠሪ ስም' : 'Emergency'}: {driver.emergencyContactName}</span>
+                            <span className="font-mono">{driver.emergencyContactPhone}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ID Photo Preview */}
+                      {driver.nationalIdPhotoUrl && (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-500 font-bold flex items-center gap-1">
+                              <FileText className="w-3.5 h-3.5 text-amber-500" />
+                              <span>{lang === 'am' ? 'የመታወቂያ ፎቶ' : 'National ID Photo'}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedScreenshotUrl(driver.nationalIdPhotoUrl || null)}
+                              className="text-indigo-600 dark:text-indigo-400 font-bold text-[10px] hover:underline cursor-pointer"
+                            >
+                              {lang === 'am' ? 'አሳድገው ይመልከቱ' : 'View Full ID'}
+                            </button>
+                          </div>
+                          <div
+                            onClick={() => setSelectedScreenshotUrl(driver.nationalIdPhotoUrl || null)}
+                            className="h-28 rounded-xl overflow-hidden bg-slate-950 border border-slate-200 dark:border-slate-700 flex items-center justify-center cursor-pointer group relative"
+                          >
+                            <img
+                              src={driver.nationalIdPhotoUrl}
+                              alt="National ID"
+                              className="w-full h-full object-contain group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-bold gap-1">
+                              <Eye className="w-4 h-4" />
+                              <span>Inspect ID</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action Approval Buttons */}
+                      <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRejectDriver(driver);
+                            setRejectReasonInput('ID / Fayda photo is blurry or unreadable');
+                            setCustomRejectNote('');
+                          }}
+                          className="flex-1 py-2.5 rounded-xl border border-rose-200 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-950 text-rose-600 dark:text-rose-400 font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>{lang === 'am' ? 'ውድቅ አድርግ' : 'Reject'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isProcessingDriverApproval}
+                          onClick={() => handleApproveDriver(driver.id)}
+                          className="flex-2 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>{lang === 'am' ? 'አጽድቅ (15 KM ጅማሮ)' : 'Approve & Activate (15 KM)'}</span>
+                        </button>
+                      </div>
+
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Rejected Registrations History */}
+          {rejectedDrivers.length > 0 && (
+            <div className="space-y-3 pt-6 border-t border-slate-200 dark:border-slate-800">
+              <h4 className="font-bold text-sm text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                <span>{lang === 'am' ? `ውድቅ የተደረጉ ማመልከቻዎች (${rejectedDrivers.length})` : `Rejected Applications (${rejectedDrivers.length})`}</span>
+              </h4>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {rejectedDrivers.map((driver) => (
+                  <div
+                    key={driver.id}
+                    className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-rose-200 dark:border-rose-900/50 space-y-2 opacity-85"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-bold text-sm text-slate-900 dark:text-white font-['Outfit'] block">
+                          {driver.name}
+                        </span>
+                        <span className="text-xs font-mono text-slate-500">{driver.phone} • {driver.bajajPlate}</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400">
+                        {lang === 'am' ? 'ውድቅ ተደርጓል' : 'Rejected'}
+                      </span>
+                    </div>
+
+                    {driver.rejectionReason && (
+                      <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 rounded-xl text-xs text-rose-700 dark:text-rose-300">
+                        <span className="font-bold block text-[10px] uppercase text-rose-500">{lang === 'am' ? 'የውድቅ ምክንያት' : 'Rejection Reason'}:</span>
+                        <span>{driver.rejectionReason}</span>
+                      </div>
+                    )}
+
+                    <div className="pt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => handleApproveDriver(driver.id)}
+                        className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 hover:text-emerald-600 text-slate-700 dark:text-slate-300 font-bold text-xs transition-colors cursor-pointer flex items-center gap-1"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>{lang === 'am' ? 'እንደገና ገምግመህ አጽድቅ' : 'Re-review & Approve'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
 
       {/* ================= TAB 1: FLEET REGISTRY ================= */}
       {activeTab === 'fleet' && (
@@ -501,658 +1112,542 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <div className="flex items-center space-x-2 w-full sm:w-auto">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0">
-                {lang === 'am' ? 'ወረዳ፡' : 'District:'}
-              </span>
               <select
                 value={districtFilter}
                 onChange={(e) => setDistrictFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden"
+                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
               >
                 <option value="all">{lang === 'am' ? 'ሁሉም ወረዳዎች' : 'All Districts'}</option>
                 {settings.districts?.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} {d.status === 'suspended' ? ' (Suspended)' : ''}
-                  </option>
+                  <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </select>
+
+              <button
+                onClick={() => setIsAddDriverModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs flex items-center space-x-1 shadow-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{lang === 'am' ? 'ባጃጅ ጨምር' : 'Add Bajaj'}</span>
+              </button>
             </div>
           </div>
 
           {/* Drivers Grid */}
-          {filteredDrivers.length === 0 ? (
-            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-3">
-              <Car className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto" />
-              <h3 className="font-bold text-slate-700 dark:text-slate-200 text-base">
-                {lang === 'am' ? 'ምንም የተመዘገበ ባጃጅ የለም' : 'No Bajaj Drivers Found'}
-              </h3>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                {lang === 'am'
-                  ? 'እርስዎ እራስዎ መመዝገብ ይችላሉ ወይም ከላይ "+ አዲስ ባጃጅ መዝግብ" የሚለውን ይጫኑ።'
-                  : 'You have a clean slate! Register your own driver account to test the system live.'}
-              </p>
-              <button
-                onClick={() => setIsAddDriverModalOpen(true)}
-                className="mt-2 px-4 py-2 bg-emerald-500 text-white rounded-xl text-xs font-bold hover:bg-emerald-600"
-              >
-                + {t(lang, 'addNewBajaj')}
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredDrivers.map((driver) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredDrivers.map((driver) => {
+              const km = driver.kmBalance ?? 15;
+              return (
                 <div
                   key={driver.id}
-                  className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs hover:border-emerald-400 transition-all space-y-4 cursor-pointer"
-                  onClick={() => setSelectedDriverDossier(driver)}
+                  className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 hover:border-slate-300 transition-colors"
                 >
-                  <div className="flex items-center space-x-3">
-                    <div className="relative w-14 h-14 rounded-full overflow-hidden border-2 border-emerald-500 shrink-0 bg-slate-800 flex items-center justify-center">
-                      <img
-                        src={driver.photoUrl}
-                        alt={driver.name}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-bold text-sm text-slate-900 dark:text-white truncate font-['Outfit']">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-12 h-12 rounded-2xl overflow-hidden border-2 border-emerald-500 shrink-0 bg-slate-800 flex items-center justify-center">
+                        {driver.photoUrl ? (
+                          <img src={driver.photoUrl} alt={driver.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Car className="w-5 h-5 text-white" />
+                        )}
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-900 dark:text-white font-['Outfit']">
                           {driver.name}
                         </h4>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          driver.isOnline 
-                            ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800' 
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-                        }`}>
-                          {driver.isOnline ? 'Online' : 'Offline'}
-                        </span>
+                        <span className="text-xs text-slate-500 font-mono">{driver.phone}</span>
                       </div>
-                      <p className="text-xs text-slate-500 font-mono mt-0.5">{driver.phone}</p>
-                      <span className="inline-block text-[10px] px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-md font-bold mt-1">
+                    </div>
+
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      driver.isOnline
+                        ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                    }`}>
+                      {driver.isOnline ? '● Online' : '○ Offline'}
+                    </span>
+                  </div>
+
+                  {/* KM Balance & Plate Info */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl">
+                      <span className="text-[10px] text-slate-400 block">{lang === 'am' ? 'የቀረ ኪ.ሜ' : 'KM Balance'}</span>
+                      <span className="font-bold text-sm font-mono text-emerald-600 dark:text-emerald-400">
+                        {km.toFixed(1)} KM
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl">
+                      <span className="text-[10px] text-slate-400 block">{lang === 'am' ? 'ታርጋ ቁጥር' : 'Plate'}</span>
+                      <span className="font-bold text-sm font-mono text-slate-900 dark:text-white">
+                        {driver.bajajPlate}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* District & Location Assignment */}
+                  <div className="p-2.5 bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/50 rounded-xl space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-indigo-500" />
+                        <span>{lang === 'am' ? 'የተመደበበት ወረዳ፡' : 'Assigned District:'}</span>
+                      </span>
+                      <span className="font-bold text-indigo-700 dark:text-indigo-300">
                         {driver.districtName}
                       </span>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
-                    <div>
-                      <span className="text-slate-400 block">Plate:</span>
-                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{driver.bajajPlate}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">National ID:</span>
-                      <span className="font-mono text-slate-800 dark:text-slate-200 truncate block">
-                        {driver.nationalIdNumber || 'Uploaded'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
-                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center space-x-1">
-                      <Eye className="w-3 h-3" />
-                      <span>{lang === 'am' ? 'መታወቂያ ፋይል ክፈት' : 'View Full ID Dossier'}</span>
-                    </span>
-
-                    {onRemoveDriver && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (window.confirm(`Remove ${driver.name}?`)) {
-                            onRemoveDriver(driver.id);
-                          }
-                        }}
-                        className="text-red-500 hover:text-red-700 p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                    {/* Quick District Switcher */}
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={driver.districtId}
+                        disabled={quickDistrictChangingId === driver.id}
+                        onChange={(e) => handleQuickChangeDistrict(driver.id, e.target.value)}
+                        className="w-full text-xs font-semibold px-2 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer focus:ring-1 focus:ring-indigo-500"
+                        title="Change District"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                        {settings.districts?.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            📍 {d.name} {d.status === 'suspended' ? '(Suspended)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {driver.villageArea && (
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block truncate">
+                        {lang === 'am' ? 'መነሻ ፌርማታ፡' : 'Stand:'} {driver.villageArea}
+                      </span>
                     )}
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
 
-        </div>
-      )}
-
-      {/* ================= TAB 2: DISTRICTS & SUSPENSION ================= */}
-      {activeTab === 'districts' && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white font-['Outfit']">
-                {t(lang, 'districtsTab')}
-              </h2>
-              <p className="text-xs text-slate-500">
-                {lang === 'am'
-                  ? 'የመንደር ወረዳዎችን ማስተዳደር፣ አዲስ መጨመር፣ ወይም ለጊዜው ማገድ/ማንቃት'
-                  : 'Manage inner-road zones, add new neighborhood perimeters, or suspend/activate districts'}
-              </p>
-            </div>
-
-            <button
-              onClick={() => setIsAddDistrictModalOpen(true)}
-              className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-emerald-500/20 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{t(lang, 'addNewDistrict')}</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {settings.districts?.map((district) => {
-              const driverCount = drivers.filter((d) => d.districtId === district.id).length;
-              const isSuspended = district.status === 'suspended';
-
-              return (
-                <div
-                  key={district.id}
-                  className={`bg-white dark:bg-slate-900 rounded-3xl p-6 border shadow-xs space-y-4 transition-all ${
-                    isSuspended 
-                      ? 'border-amber-400/60 bg-amber-50/10' 
-                      : 'border-slate-200 dark:border-slate-800'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span
-                        className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mb-1.5 ${
-                          isSuspended
-                            ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
-                            : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
-                        }`}
-                      >
-                        {isSuspended ? t(lang, 'districtSuspended') : t(lang, 'districtActive')}
-                      </span>
-                      <h3 className="text-base font-bold text-slate-900 dark:text-white font-['Outfit']">
-                        {district.name}
-                      </h3>
-                    </div>
-
-                    <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                      <MapPin className="w-4 h-4" />
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    {district.description}
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-2 p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-100 dark:border-slate-800 text-xs">
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">Registered Fleet:</span>
-                      <span className="font-bold text-slate-800 dark:text-slate-200">{driverCount} Bajajs</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">Max Radius:</span>
-                      <span className="font-bold text-slate-800 dark:text-slate-200">{district.maxRadiusKm} KM</span>
-                    </div>
-                  </div>
-
-                  {/* Actions: Suspend/Activate & Delete */}
-                  <div className="flex items-center space-x-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  {/* Actions: Edit Everything, Adjust KM, ID Dossier, Delete */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                     <button
-                      onClick={() => handleToggleDistrictStatus(district)}
-                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-colors cursor-pointer ${
-                        isSuspended
-                          ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100'
-                          : 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800 hover:bg-amber-100'
-                      }`}
+                      onClick={() => handleOpenEditDriver(driver)}
+                      className="flex-1 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                      title="Edit all details, district, plate, contact, KM, and info"
                     >
-                      {isSuspended ? (
-                        <>
-                          <PlayCircle className="w-3.5 h-3.5" />
-                          <span>{t(lang, 'activateDistrict')}</span>
-                        </>
-                      ) : (
-                        <>
-                          <PauseCircle className="w-3.5 h-3.5" />
-                          <span>{t(lang, 'suspendDistrict')}</span>
-                        </>
-                      )}
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>{lang === 'am' ? 'ሁሉንም አርትዕ' : 'Edit Everything'}</span>
                     </button>
 
-                    {onDeleteDistrict && (settings.districts?.length || 0) > 1 && (
-                      <button
-                        onClick={() => {
-                          if (window.confirm(`Delete ${district.name}?`)) {
-                            onDeleteDistrict(district.id);
-                          }
-                        }}
-                        className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setAdjustKmDriver(driver)}
+                      className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 transition-colors cursor-pointer"
+                      title="Adjust KM Balance"
+                    >
+                      <Gauge className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      onClick={() => setSelectedDriverDossier(driver)}
+                      className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                      title="View ID Dossier"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      onClick={() => handleDeleteDriver(driver.id, driver.name)}
+                      className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-600 border border-rose-200 dark:border-rose-800 transition-colors cursor-pointer"
+                      title="Permanently Delete Driver"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
+
                 </div>
               );
             })}
           </div>
+
         </div>
       )}
 
-      {/* ================= TAB 3: 2% ANNUAL SETTLEMENT ================= */}
+      {/* ================= TAB 2: DISTRICT BOUNDARIES ================= */}
+      {activeTab === 'districts' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white font-['Outfit']">
+                {lang === 'am' ? 'የመንደር ወረዳዎች እና ገደቦች' : 'Village Districts & Geographic Boundaries'}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {lang === 'am' ? 'የኮንትራት ጥሪዎች በ3 ኪ.ሜ ወረዳ ውስጥ ላሉ ባጃጆች ብቻ ይደወላሉ' : 'Dispatch is localized within each 3 KM district range.'}
+              </p>
+            </div>
+            <button
+              onClick={() => setIsAddDistrictModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs flex items-center space-x-1 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{t(lang, 'addNewDistrict')}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {settings.districts?.map((d) => (
+              <div
+                key={d.id}
+                className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit']">
+                    {d.name}
+                  </h4>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    d.status === 'suspended'
+                      ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
+                      : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                  }`}>
+                    {d.status === 'suspended' ? 'Suspended' : 'Active'}
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {d.description}
+                </p>
+
+                <div className="text-[11px] text-slate-400 font-mono">
+                  Center: {d.center?.lat?.toFixed(4)}, {d.center?.lng?.toFixed(4)} • Radius: {d.maxRadiusKm || 3} KM
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    onClick={() => handleToggleDistrictStatus(d)}
+                    className="flex-1 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+                  >
+                    {d.status === 'suspended' ? 'Activate' : 'Suspend'}
+                  </button>
+
+                  {onDeleteDistrict && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Delete district ${d.name}?`)) {
+                          onDeleteDistrict(d.id);
+                        }
+                      }}
+                      className="p-1.5 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition-colors cursor-pointer"
+                      title="Delete District"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ================= TAB 3: 2% ANNUAL SETTLEMENTS ================= */}
       {activeTab === 'annual_fees' && (
-        <div className="space-y-6">
-          <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-3xl p-6 border border-emerald-200 dark:border-emerald-900/50 space-y-2">
-            <h3 className="font-bold text-emerald-950 dark:text-emerald-200 text-sm flex items-center space-x-2 font-['Outfit']">
-              <Percent className="w-4 h-4 text-emerald-600" />
-              <span>{lang === 'am' ? 'የ2% ዓመታዊ የኮሚሽን አከፋፈል መርህ' : 'Zero Daily Commission • 2% Annual Settlement Policy'}</span>
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-2">
+            <h3 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit'] flex items-center gap-2">
+              <Percent className="w-5 h-5 text-emerald-500" />
+              <span>{lang === 'am' ? '2% ዓመታዊ የኮሚሽን ክፍያ ሂሳብ' : '2% Annual Platform Commission Settlement'}</span>
             </h3>
-            <p className="text-xs text-emerald-800 dark:text-emerald-300/80 leading-relaxed">
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-2xl leading-relaxed">
               {lang === 'am'
-                ? 'አሽከርካሪዎች የየዕለቱን የኮንትራት ዋጋ 100% በሙሉ በቀጥታ ይወስዳሉ። በዓመት አንድ ጊዜ ከጠቅላላ የጉዞ መጠን 2% ብቻ ይከፍላሉ።'
-                : 'Drivers keep 100% of their daily passenger cash / Telebirr fares. Coordinator collects only 2% once per year during annual settlement.'}
+                ? 'ሾፌሮች በየቀኑ የሰበሰቡትን 100% ገቢ ሙሉ ለሙሉ በቀጥታ ይወስዳሉ። በዓመት አንድ ጊዜ ብቻ 2% የአስተዳደር ኮሚሽን ይከፍላሉ።'
+                : 'Drivers retain 100% of daily fares. The 2% commission is calculated once annually and settled directly.'}
             </p>
           </div>
 
           <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800 font-bold text-sm text-slate-900 dark:text-white font-['Outfit']">
-              {lang === 'am' ? 'የ2026 ዓ.ም የባጃጆች የሂሳብ መዝገብ' : '2026 Annual Settlement Ledger'}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold">
+                  <tr>
+                    <th className="p-3.5">Driver</th>
+                    <th className="p-3.5">Plate</th>
+                    <th className="p-3.5">District</th>
+                    <th className="p-3.5">Total Fare Volume</th>
+                    <th className="p-3.5">2% Annual Commission</th>
+                    <th className="p-3.5">Status</th>
+                    <th className="p-3.5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+                  {drivers.map((d) => {
+                    const estEarnings = (d.totalTripsCompleted || 0) * 85;
+                    const commission = Math.round(estEarnings * 0.02);
+                    return (
+                      <tr key={d.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
+                        <td className="p-3.5 font-bold">{d.name}</td>
+                        <td className="p-3.5 font-mono">{d.bajajPlate}</td>
+                        <td className="p-3.5">{d.districtName}</td>
+                        <td className="p-3.5 font-mono font-bold text-slate-900 dark:text-white">{estEarnings} Br</td>
+                        <td className="p-3.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">{commission} Br</td>
+                        <td className="p-3.5">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                            Up to date
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <button
+                            onClick={() => onSettleAnnualFee && onSettleAnnualFee(d.id)}
+                            className="px-3 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-xs font-bold text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                          >
+                            Mark Settled
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-
-            {drivers.length === 0 ? (
-              <div className="p-8 text-center text-xs text-slate-400">
-                {lang === 'am' ? 'ምንም አሽከርካሪ አልተመዘገበም' : 'No drivers registered yet.'}
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                {drivers.map((driver) => (
-                  <div key={driver.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                    <div className="flex items-center space-x-3">
-                      <img src={driver.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover border border-slate-300 dark:border-slate-700" />
-                      <div>
-                        <h4 className="font-bold text-xs text-slate-900 dark:text-white">{driver.name}</h4>
-                        <p className="text-[11px] text-slate-500 font-mono">{driver.bajajPlate} • {driver.districtName}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-6 text-xs">
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Trips:</span>
-                        <span className="font-bold">{driver.totalTripsCompleted || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Est. Earnings:</span>
-                        <span className="font-bold font-mono">{(driver.totalEstimatedEarnings || 0).toLocaleString()} Br</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">2% Due:</span>
-                        <span className="font-bold text-emerald-600 font-mono">{(driver.annualCommissionDue || 0).toLocaleString()} Br</span>
-                      </div>
-
-                      {onSettleAnnualFee && (
-                        <button
-                          onClick={() => onSettleAnnualFee(driver.id)}
-                          className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 rounded-xl text-xs font-bold hover:bg-emerald-100 cursor-pointer"
-                        >
-                          {t(lang, 'markSettled')}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       )}
 
-      {/* ================= TAB 4: SETTINGS, PASSWORD & SUPPORT CONTACTS ================= */}
+      {/* ================= TAB 4: SETTINGS & PAYMENT ACCOUNTS ================= */}
       {activeTab === 'settings' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          
-          {/* Change Admin Password Card */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
-            <div className="flex items-center space-x-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                <KeyRound className="w-4 h-4 text-emerald-500" />
-              </div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white font-['Outfit']">
-                {t(lang, 'changePassword')}
-              </h3>
-            </div>
-
-            <form onSubmit={handleChangePassword} className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  {t(lang, 'currentPassword')}
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={currentPassInput}
-                  onChange={(e) => setCurrentPassInput(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  {t(lang, 'newPassword')}
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={newPassInput}
-                  onChange={(e) => setNewPassInput(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  {t(lang, 'confirmPassword')}
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={confirmPassInput}
-                  onChange={(e) => setConfirmPassInput(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              {passChangeSuccess && (
-                <p className="text-xs font-bold text-emerald-600 flex items-center space-x-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>{passChangeSuccess}</span>
-                </p>
-              )}
-
-              {passChangeError && (
-                <p className="text-xs font-bold text-red-500 flex items-center space-x-1">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>{passChangeError}</span>
-                </p>
-              )}
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                {t(lang, 'updatePasswordBtn')}
-              </button>
-            </form>
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-800 space-y-6">
+          <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+            <h3 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit']">
+              {lang === 'am' ? 'የአስተባባሪ ክፍያ አካውንቶችና የመንደር ቅንብሮች' : 'Coordinator Accounts & Village Settings'}
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {lang === 'am'
+                ? 'ሾፌሮች የ100 ብር (15 KM) ክፍያ የሚልኩባቸውን የቴሌብር እና የባንክ አካውንቶች ያስተካክሉ'
+                : 'Configure payment accounts where drivers send 100 Birr mileage recharge receipts.'}
+            </p>
           </div>
 
-          {/* Support Contacts & Village Rates */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
-            <div className="flex items-center space-x-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                <Settings className="w-4 h-4 text-emerald-500" />
+          <form onSubmit={handleSaveSettings} className="space-y-4 max-w-2xl">
+            {settingsSavedMsg && (
+              <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950 border border-emerald-300 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{lang === 'am' ? 'ቅንብሮቹ በተሳካ ሁኔታ ተቀምጠዋል!' : 'Settings successfully updated!'}</span>
               </div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white font-['Outfit']">
-                {lang === 'am' ? 'የድጋፍ ስልክ፣ ኢሜይል እና ተመን' : 'Support Contacts & Rate Calibration'}
-              </h3>
-            </div>
+            )}
 
-            <form onSubmit={handleSaveSettings} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center space-x-1.5">
-                  <Phone className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>{t(lang, 'supportPhoneLabel')}</span>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  {lang === 'am' ? 'የመንደር / የሰፈር ስም' : 'Village Name'}
                 </label>
                 <input
                   type="text"
-                  required
-                  value={supportPhone}
-                  onChange={(e) => setSupportPhone(e.target.value)}
-                  placeholder="+251 9..."
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  value={villageName}
+                  onChange={(e) => setVillageName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-bold"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center space-x-1.5">
-                  <Mail className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>{t(lang, 'supportEmailLabel')}</span>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  {lang === 'am' ? 'የአድሚን ስልክ ቁጥር' : 'Admin Phone Number'}
                 </label>
                 <input
-                  type="email"
-                  required
-                  value={supportEmail}
-                  onChange={(e) => setSupportEmail(e.target.value)}
-                  placeholder="coordinator@villagebajaj.et"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  type="tel"
+                  value={adminPhone}
+                  onChange={(e) => setAdminPhone(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-amber-600 dark:text-amber-400">
+                  Telebirr Account No.
+                </label>
+                <input
+                  type="text"
+                  value={telebirrAccount}
+                  onChange={(e) => setTelebirrAccount(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Base Fare (Br)</label>
-                  <input
-                    type="number"
-                    value={baseContractFare}
-                    onChange={(e) => setBaseContractFare(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Rate / KM (Br)</label>
-                  <input
-                    type="number"
-                    value={ratePerKm}
-                    onChange={(e) => setRatePerKm(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-purple-600 dark:text-purple-400">
+                  CBE Bank Account No.
+                </label>
+                <input
+                  type="text"
+                  value={cbeAccount}
+                  onChange={(e) => setCbeAccount(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold"
+                />
               </div>
 
-              {settingsSavedMsg && (
-                <p className="text-xs font-bold text-emerald-600 flex items-center space-x-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>{lang === 'am' ? 'ቅንብሮቹ ተቀምጠዋል!' : 'Settings successfully saved!'}</span>
-                </p>
-              )}
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md shadow-emerald-500/20 cursor-pointer"
-              >
-                {t(lang, 'saveSettingsBtn')}
-              </button>
-            </form>
-
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                onClick={handleClearAllData}
-                className="w-full py-2 rounded-xl border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 text-xs font-bold transition-colors cursor-pointer"
-              >
-                {t(lang, 'clearAllDemoData')}
-              </button>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                  Awash Bank Account No.
+                </label>
+                <input
+                  type="text"
+                  value={awashAccount}
+                  onChange={(e) => setAwashAccount(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold"
+                />
+              </div>
             </div>
-          </div>
 
-        </div>
-      )}
-
-      {/* ================= TAB 5: PROMOTION IN VILLAGE ================= */}
-      {activeTab === 'promotion' && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white font-['Outfit']">
-                {lang === 'am' ? 'በመንደሩ ውስጥ ማስተዋወቂያ ኪት' : 'Village Promotion Noticeboard Flyer'}
-              </h2>
-              <p className="text-xs text-slate-500">
-                {lang === 'am' ? 'የQR ኮድ ያለው ፖስተር አትመው በሰፈር መግቢያዎችና በባጃጅ ማቆሚያዎች ይለጥፉ' : 'Print and stick noticeboard flyers at village gates & stands'}
-              </p>
+            <div className="space-y-1 pt-2">
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                {lang === 'am' ? 'የ15 ኪ.ሜ የክሬዲት ዋጋ (ብር)' : 'KM Recharge Rate (Birr per 15 KM)'}
+              </label>
+              <input
+                type="number"
+                value={kmRateBirr}
+                onChange={(e) => setKmRateBirr(Number(e.target.value))}
+                className="w-full sm:w-48 px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold"
+              />
             </div>
 
             <button
+              type="submit"
+              className="px-6 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+            >
+              {lang === 'am' ? 'ቅንብሮቹን መዝግብ' : 'Save Settings'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* ================= TAB 5: PROMOTION ================= */}
+      {activeTab === 'promotion' && (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-800 space-y-4">
+          <h3 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit'] flex items-center gap-2">
+            <QrCode className="w-5 h-5 text-emerald-500" />
+            <span>{t(lang, 'promotionTab')}</span>
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {lang === 'am'
+              ? 'ይህንን የQR ኮድ በማተም በመንደርዎ ሱቆች፣ በረንዳዎችና የመንገድ መገናኛዎች ላይ ይለጥፉ!'
+              : 'Print and display this QR code at local stands, kiosks, and gates for residents to call rides.'}
+          </p>
+
+          <div className="p-8 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-700 text-center max-w-sm mx-auto space-y-4">
+            <div className="w-48 h-48 bg-white p-4 rounded-2xl mx-auto shadow-md flex items-center justify-center">
+              <QrCode className="w-full h-full text-slate-900" />
+            </div>
+            <span className="font-bold text-sm text-slate-900 dark:text-white block font-['Outfit']">
+              {settings.villageName} BajajLink
+            </span>
+            <button
               onClick={() => window.print()}
-              className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center space-x-1.5 cursor-pointer"
+              className="w-full py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Printer className="w-4 h-4" />
-              <span>{lang === 'am' ? 'ፖስተሩን አትም' : 'Print Noticeboard Flyer'}</span>
+              <span>Print Poster</span>
             </button>
-          </div>
-
-          <div className="p-6 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 max-w-lg mx-auto text-center space-y-4">
-            <div className="inline-block px-3 py-1 bg-emerald-500 text-white rounded-full font-bold text-xs">
-              {settings.villageName}
-            </div>
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white font-['Outfit']">
-              {lang === 'am' ? 'የኮንትራት ባጃጅ ከቤትዎ ይጥሩ!' : 'Call Contrat Bajaj Right From Home!'}
-            </h3>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              {lang === 'am'
-                ? `ስልክ፡ ${settings.supportPhone} • በ3 ኪ.ሜ ውስጥ ለሚገኙ ባጃጆች በቀጥታ ይጠራል`
-                : `Coordinator: ${settings.supportPhone} • Instant 3 KM Bajaj Calling`}
-            </p>
-
-            <div className="w-40 h-40 bg-white p-3 rounded-2xl shadow-md mx-auto flex items-center justify-center border border-slate-200">
-              <QrCode className="w-32 h-32 text-slate-900" />
-            </div>
-
-            <p className="text-[11px] text-slate-400">
-              Scan with phone camera to open village dispatch instantly.
-            </p>
           </div>
         </div>
       )}
 
-      {/* ================= MODAL: DRIVER FULL ID DOSSIER ================= */}
-      {selectedDriverDossier && (
+      {/* ================= MODAL: ZOOM PAYMENT SCREENSHOT ================= */}
+      {selectedScreenshotUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-slate-900 rounded-3xl max-w-2xl w-full p-4 border border-slate-800 space-y-3 relative shadow-2xl">
+            <button
+              onClick={() => setSelectedScreenshotUrl(null)}
+              className="absolute top-4 right-4 w-9 h-9 rounded-full bg-black/60 hover:bg-black text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <XCircle className="w-5 h-5" />
+            </button>
+            <h4 className="font-bold text-sm text-white px-2 pt-1">
+              Payment Confirmation Receipt (Full Zoom)
+            </h4>
+            <div className="rounded-2xl overflow-hidden bg-black max-h-[75vh] flex items-center justify-center">
+              <img src={selectedScreenshotUrl} alt="Receipt Proof Full" className="w-full h-auto max-h-[70vh] object-contain" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: ADJUST DRIVER KM ================= */}
+      {adjustKmDriver && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5 max-h-[90vh] overflow-y-auto">
-            
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center space-x-2">
-                <ShieldCheck className="w-5 h-5 text-emerald-500" />
+              <div>
                 <h3 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit']">
-                  {t(lang, 'driverDossier')}
+                  Adjust Mileage Credit
                 </h3>
+                <p className="text-xs text-slate-500">{adjustKmDriver.name} ({adjustKmDriver.bajajPlate})</p>
               </div>
-              <button
-                onClick={() => setSelectedDriverDossier(null)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400"
-              >
+              <button onClick={() => setAdjustKmDriver(null)} className="p-1 text-slate-400 hover:text-slate-600">
                 <XCircle className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex items-center space-x-4">
-              <div className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-emerald-500 shrink-0 bg-slate-800">
-                <img
-                  src={selectedDriverDossier.photoUrl}
-                  alt={selectedDriverDossier.name}
-                  className="w-full h-full object-cover"
-                />
+            <div className="space-y-3">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl text-xs flex justify-between items-center">
+                <span className="text-slate-500">Current Balance:</span>
+                <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400 text-sm">
+                  {(adjustKmDriver.kmBalance || 0).toFixed(1)} KM
+                </span>
               </div>
 
               <div className="space-y-1">
-                <h4 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit']">
-                  {selectedDriverDossier.name}
-                </h4>
-                <p className="text-xs text-emerald-600 dark:text-emerald-400 font-bold">
-                  {selectedDriverDossier.districtName} ({selectedDriverDossier.villageArea})
-                </p>
-                <p className="text-xs text-slate-500 font-mono">
-                  Primary: {selectedDriverDossier.phone}
-                </p>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Amount to Add (+KM) or Deduct (-KM)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  value={kmAdjustAmount}
+                  onChange={(e) => setKmAdjustAmount(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-mono font-bold"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setKmAdjustAmount('15')}
+                  className="flex-1 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-bold"
+                >
+                  +15 KM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setKmAdjustAmount('30')}
+                  className="flex-1 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-bold"
+                >
+                  +30 KM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setKmAdjustAmount('-10')}
+                  className="flex-1 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-rose-500"
+                >
+                  -10 KM
+                </button>
+              </div>
+
+              <div className="flex space-x-2 pt-2">
+                <button
+                  onClick={() => setAdjustKmDriver(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAdjustDriverKm}
+                  disabled={isAdjustingKm}
+                  className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md"
+                >
+                  {isAdjustingKm ? 'Saving...' : 'Apply KM'}
+                </button>
               </div>
             </div>
-
-            {/* National ID Photo Display & Cropper Trigger */}
-            <div className="p-4 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  {t(lang, 'nationalIdCard')}
-                </span>
-                {selectedDriverDossier.nationalIdPhotoUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCropImageSrc(selectedDriverDossier.nationalIdPhotoUrl!);
-                      setCropTarget('dossier_driver');
-                      setIsCropModalOpen(true);
-                    }}
-                    className="text-xs text-emerald-600 dark:text-emerald-400 font-bold flex items-center space-x-1 hover:underline cursor-pointer"
-                  >
-                    <Crop className="w-3.5 h-3.5" />
-                    <span>{t(lang, 'cropProfilePhoto')}</span>
-                  </button>
-                )}
-              </div>
-
-              {selectedDriverDossier.nationalIdPhotoUrl ? (
-                <div className="rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 aspect-16/9 bg-slate-900 flex items-center justify-center">
-                  <img
-                    src={selectedDriverDossier.nationalIdPhotoUrl}
-                    alt="National ID"
-                    className="w-full h-full object-contain"
-                  />
-                </div>
-              ) : (
-                <p className="text-xs text-slate-400 italic">No National ID photo image stored.</p>
-              )}
-            </div>
-
-            {/* Detailed Metadata Grid */}
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
-                <span className="text-slate-400 block text-[10px]">National / Kebele ID:</span>
-                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                  {selectedDriverDossier.nationalIdNumber || 'Verified in person'}
-                </span>
-              </div>
-
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
-                <span className="text-slate-400 block text-[10px]">Bajaj Plate Number:</span>
-                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                  {selectedDriverDossier.bajajPlate}
-                </span>
-              </div>
-
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
-                <span className="text-slate-400 block text-[10px]">Color & Model:</span>
-                <span className="font-bold text-slate-800 dark:text-slate-200">
-                  {selectedDriverDossier.bajajColor} • {selectedDriverDossier.modelYear || '2024'}
-                </span>
-              </div>
-
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
-                <span className="text-slate-400 block text-[10px]">Secondary Contact:</span>
-                <span className="font-mono text-slate-800 dark:text-slate-200">
-                  {selectedDriverDossier.secondaryPhone || selectedDriverDossier.emergencyContactPhone || 'None'}
-                </span>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex space-x-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setSelectedDriverDossier(null)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs"
-              >
-                Close
-              </button>
-              
-              <a
-                href={`tel:${selectedDriverDossier.phone}`}
-                className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs flex items-center justify-center space-x-1.5 shadow-md shadow-emerald-500/20"
-              >
-                <Phone className="w-3.5 h-3.5" />
-                <span>Call Driver</span>
-              </a>
-            </div>
-
           </div>
         </div>
       )}
 
-      {/* ================= MODAL: ADD NEW BAJAJ (ADMIN) ================= */}
+      {/* ================= MODAL: ADD DRIVER ================= */}
       {isAddDriverModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit']">
                 {t(lang, 'addNewBajaj')}
@@ -1165,7 +1660,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleAddDriverSubmit} className="space-y-4">
+            <form onSubmit={handleAddDriverSubmit} className="space-y-3">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                   {t(lang, 'fullName')} *
@@ -1175,8 +1670,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   required
                   value={newDriverData.name}
                   onChange={(e) => setNewDriverData({ ...newDriverData, name: e.target.value })}
-                  placeholder="e.g. Dawit Bekele"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  placeholder="e.g. Dawit Tadesse"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
                 />
               </div>
 
@@ -1191,7 +1686,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     value={newDriverData.phone}
                     onChange={(e) => setNewDriverData({ ...newDriverData, phone: e.target.value })}
                     placeholder="+251 9..."
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
                   />
                 </div>
 
@@ -1233,36 +1728,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <option key={d.id} value={d.id}>{d.name}</option>
                   ))}
                 </select>
-              </div>
-
-              {/* National ID Photo Upload & Crop Trigger */}
-              <div className="p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                  {t(lang, 'uploadNationalId')}
-                </label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = () => {
-                        if (typeof reader.result === 'string') {
-                          setNewDriverData(prev => ({
-                            ...prev,
-                            nationalIdPhotoUrl: reader.result as string,
-                          }));
-                          setCropImageSrc(reader.result as string);
-                          setCropTarget('add_driver');
-                          setIsCropModalOpen(true);
-                        }
-                      };
-                      reader.readAsDataURL(file);
-                    }
-                  }}
-                  className="text-xs"
-                />
               </div>
 
               <div className="flex space-x-3 pt-2">
@@ -1367,6 +1832,391 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
+      {/* ================= MODAL: DRIVER FULL ID DOSSIER ================= */}
+      {selectedDriverDossier && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit']">
+                  Driver Identity Dossier
+                </h3>
+                <p className="text-xs text-slate-500">{selectedDriverDossier.name} • {selectedDriverDossier.bajajPlate}</p>
+              </div>
+              <button onClick={() => setSelectedDriverDossier(null)} className="p-1 text-slate-400 hover:text-slate-600">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center space-x-4">
+              <div className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-emerald-500 shrink-0 bg-slate-800">
+                <img src={selectedDriverDossier.photoUrl} alt={selectedDriverDossier.name} className="w-full h-full object-cover" />
+              </div>
+              <div className="space-y-1 text-xs">
+                <span className="font-bold text-base text-slate-900 dark:text-white block">{selectedDriverDossier.name}</span>
+                <span className="font-mono text-slate-500 block">{selectedDriverDossier.phone}</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400 block">{selectedDriverDossier.districtName}</span>
+              </div>
+            </div>
+
+            {selectedDriverDossier.nationalIdPhotoUrl && (
+              <div className="space-y-1">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">National ID Card:</span>
+                <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-950 aspect-16/10 flex items-center justify-center">
+                  <img src={selectedDriverDossier.nationalIdPhotoUrl} alt="National ID" className="w-full h-full object-contain" />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: EDIT DRIVER EVERYTHING ================= */}
+      {isEditDriverModalOpen && editingDriver && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 max-h-[92vh] overflow-y-auto">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white font-['Outfit']">
+                    {lang === 'am' ? 'የአሽከርካሪ መረጃ እና ወረዳ ማስተካከያ' : 'Edit Driver Dossier & District'}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {editingDriver.name} • {editingDriver.bajajPlate}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsEditDriverModalOpen(false);
+                  setEditingDriver(null);
+                }}
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditDriver} className="space-y-4">
+              
+              {/* DISTRICT ASSIGNMENT (Highlighted) */}
+              <div className="p-3.5 bg-indigo-50/70 dark:bg-indigo-950/40 border-2 border-indigo-200 dark:border-indigo-800 rounded-2xl space-y-2">
+                <label className="text-xs font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-indigo-600" />
+                  <span>{lang === 'am' ? 'የተመደበበት ወረዳ (District) ቀይር *' : 'Assigned District (Change Location) *'}</span>
+                </label>
+                <select
+                  required
+                  value={editDriverData.districtId}
+                  onChange={(e) => {
+                    const selectedD = settings.districts?.find(d => d.id === e.target.value);
+                    if (selectedD) {
+                      setEditDriverData({
+                        ...editDriverData,
+                        districtId: selectedD.id,
+                        districtName: selectedD.name,
+                        villageArea: selectedD.landmarks?.[0]?.name || `${selectedD.name} Stand`,
+                      });
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-bold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                >
+                  {settings.districts?.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      📍 {d.name} ({d.description}) {d.status === 'suspended' ? '⚠️ [SUSPENDED]' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
+                  {lang === 'am' ? 'ወረዳውን ሲቀይሩ ጥሪዎች የሚደርሱት ለአዲሱ ወረዳ ብቻ ነው' : 'Changing district routes contract dispatch calls from that area.'}
+                </p>
+              </div>
+
+              {/* Basic Personal Info */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'ሙሉ ስም *' : 'Full Name *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editDriverData.name || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, name: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'ዋና ስልክ ቁጥር *' : 'Primary Phone *'}
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={editDriverData.phone || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, phone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-medium focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Secondary Phone & Stand */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'ተጨማሪ ስልክ (አማራጭ)' : 'Secondary Phone (Optional)'}
+                  </label>
+                  <input
+                    type="tel"
+                    value={editDriverData.secondaryPhone || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, secondaryPhone: e.target.value })}
+                    placeholder="09..."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'መነሻ ፌርማታ / ሰፈር' : 'Village Stand / Kebele Area'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editDriverData.villageArea || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, villageArea: e.target.value })}
+                    placeholder="e.g. Gerji Main Taxi Stand"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Bajaj Details: Plate, Color, Model */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'የባጃጅ ታርጋ *' : 'Bajaj Plate *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editDriverData.bajajPlate || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, bajajPlate: e.target.value.toUpperCase() })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'ቀለም' : 'Bajaj Color'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editDriverData.bajajColor || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, bajajColor: e.target.value })}
+                    placeholder="Yellow & Blue"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'ሞዴል / ዓ.ም' : 'Model / Year'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editDriverData.modelYear || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, modelYear: e.target.value })}
+                    placeholder="2024 TVS King"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* KM Balance & Rating */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                    <Gauge className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>{lang === 'am' ? 'የቀረ ኪ.ሜ (Mileage Balance) *' : 'KM Balance (Mileage) *'}</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={editDriverData.kmBalance ?? 15}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, kmBalance: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 text-sm font-bold font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                    <Award className="w-3.5 h-3.5 text-amber-500" />
+                    <span>{lang === 'am' ? 'የአሽከርካሪ ደረጃ (1 - 5)' : 'Driver Rating (1 - 5)'}</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="1"
+                    max="5"
+                    value={editDriverData.rating ?? 5.0}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, rating: parseFloat(e.target.value) || 5.0 })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-bold font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Identification IDs: National ID, Fayda, Kebele */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'የቀበሌ / ብሔራዊ መታወቂያ' : 'Kebele / National ID'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editDriverData.nationalIdNumber || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, nationalIdNumber: e.target.value })}
+                    placeholder="ETH-..."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'ፋይዳ ዲጂታል ቁጥር (Fayda)' : 'Fayda Digital ID'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editDriverData.faydaNumber || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, faydaNumber: e.target.value })}
+                    placeholder="FAYDA-..."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'የቤት ቁጥር' : 'House Number'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editDriverData.kebeleHouseNumber || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, kebeleHouseNumber: e.target.value })}
+                    placeholder="H-124"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Emergency Contact Info */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'የአደጋ ጊዜ ተጠሪ ስም' : 'Emergency Contact Name'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editDriverData.emergencyContactName || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, emergencyContactName: e.target.value })}
+                    placeholder="Contact Name"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {lang === 'am' ? 'የአደጋ ጊዜ ተጠሪ ስልክ' : 'Emergency Contact Phone'}
+                  </label>
+                  <input
+                    type="tel"
+                    value={editDriverData.emergencyContactPhone || ''}
+                    onChange={(e) => setEditDriverData({ ...editDriverData, emergencyContactPhone: e.target.value })}
+                    placeholder="09..."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Driver Photo URL */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  {lang === 'am' ? 'የአሽከርካሪ ፎቶ አድራሻ (Photo URL)' : 'Driver Profile Photo URL'}
+                </label>
+                <input
+                  type="text"
+                  value={editDriverData.photoUrl || ''}
+                  onChange={(e) => setEditDriverData({ ...editDriverData, photoUrl: e.target.value })}
+                  placeholder="https://..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+                />
+              </div>
+
+              {/* Status Online/Offline */}
+              <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  {lang === 'am' ? 'የአሽከርካሪ ዝግጁነት ሁኔታ፡' : 'Active Online Status:'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEditDriverData({ ...editDriverData, isOnline: !editDriverData.isOnline })}
+                  className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                    editDriverData.isOnline
+                      ? 'bg-emerald-500 text-white shadow-xs'
+                      : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {editDriverData.isOnline ? '● Online (Receiving Calls)' : '○ Offline (Resting)'}
+                </button>
+              </div>
+
+              {/* Action Buttons: Delete vs Save */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                
+                {/* Danger Delete Button */}
+                <button
+                  type="button"
+                  onClick={() => handleDeleteDriver(editingDriver.id, editingDriver.name)}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-300 dark:border-rose-800 text-rose-600 dark:text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{lang === 'am' ? 'አሽከርካሪውን በቋሚነት ሰርዝ' : 'Permanently Delete Driver'}</span>
+                </button>
+
+                {/* Cancel & Save Buttons */}
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditDriverModalOpen(false);
+                      setEditingDriver(null);
+                    }}
+                    className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    {lang === 'am' ? 'ሰርዝ' : 'Cancel'}
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isSavingDriver}
+                    className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-600/25 flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{isSavingDriver ? (lang === 'am' ? 'በማስቀመጥ ላይ...' : 'Saving...') : (lang === 'am' ? 'ለውጦችን መዝግብ' : 'Save Changes')}</span>
+                  </button>
+                </div>
+
+              </div>
+
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Interactive Image Cropper Modal */}
       <ImageCropModal
         isOpen={isCropModalOpen}
@@ -1378,6 +2228,140 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           setCropImageSrc(null);
         }}
       />
+
+      {/* Driver Application Rejection Feedback Modal */}
+      {selectedRejectDriver && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 max-w-lg w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                <AlertCircle className="w-5 h-5" />
+                <h3 className="font-bold text-base font-['Outfit']">
+                  {lang === 'am' ? 'የአሽከርካሪ ማመልከቻን ውድቅ አድርግ' : 'Reject Driver Registration'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedRejectDriver(null)}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 shrink-0">
+                {selectedRejectDriver.photoUrl ? (
+                  <img src={selectedRejectDriver.photoUrl} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <Car className="w-5 h-5 text-white m-auto" />
+                )}
+              </div>
+              <div>
+                <span className="font-bold text-sm text-slate-900 dark:text-white block font-['Outfit']">
+                  {selectedRejectDriver.name}
+                </span>
+                <span className="text-xs text-slate-500 font-mono">
+                  {selectedRejectDriver.phone} • Plate: {selectedRejectDriver.bajajPlate}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              {lang === 'am'
+                ? 'እባክዎ አሽከርካሪው ቅጹን በትክክል አስተካክሎ እንዲልክ ምክንያቱን ይምረጡ ወይም ይጻፉ። ይህ መልዕክት ለአሽከርካሪው በስክሪኑ ላይ ይታያል፡'
+                : 'Please select or type the reason for rejection. This notification will be displayed on the driver’s phone so they can correct and resubmit:'}
+            </p>
+
+            {/* Preset Reasons */}
+            <div className="space-y-2">
+              {[
+                {
+                  key: 'ID / Fayda photo is blurry or unreadable',
+                  labelEn: 'National ID / Fayda photo is blurry or unreadable',
+                  labelAm: 'የመታወቂያ/የፋይዳ ፎቶው ግልጽ አይደለም፣ እባክዎ ጥራት ያለው ፎቶ አንስተው እንደገና ይላኩ',
+                },
+                {
+                  key: 'Bajaj plate number is invalid or does not match Kebele records',
+                  labelEn: 'Plate number is invalid or does not match Kebele records',
+                  labelAm: 'የባጃጁ ታርጋ ቁጥር ልክ አይደለም ወይም ከቀበሌ መዝገብ ጋር አይመሳሰልም',
+                },
+                {
+                  key: 'Driver primary/secondary phone is unreachable or incorrect',
+                  labelEn: 'Phone number is unreachable or invalid',
+                  labelAm: 'የስልክ ቁጥሩ ልክ አይደለም ወይም ጥሪ አይቀበልም',
+                },
+                {
+                  key: 'Selected district is outside our operational service range',
+                  labelEn: 'District is outside current service boundary',
+                  labelAm: 'የተመረጠው ወረዳ ከአሁኑ የአገልግሎት ክልላችን ውጭ ነው',
+                },
+                {
+                  key: 'Other Reason',
+                  labelEn: 'Other specific reason (Type custom note below)',
+                  labelAm: 'ሌላ የተለየ ምክንያት (ከታች በዝርዝር ይጻፉ)',
+                },
+              ].map((item) => (
+                <label
+                  key={item.key}
+                  onClick={() => setRejectReasonInput(item.key)}
+                  className={`flex items-start gap-2.5 p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
+                    rejectReasonInput === item.key
+                      ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200 ring-2 ring-rose-500/20'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="reject_reason"
+                    checked={rejectReasonInput === item.key}
+                    onChange={() => setRejectReasonInput(item.key)}
+                    className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                  />
+                  <span className="leading-snug">{lang === 'am' ? item.labelAm : item.labelEn}</span>
+                </label>
+              ))}
+            </div>
+
+            {/* Custom Note */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                {lang === 'am' ? 'ተጨማሪ ማብራሪያ (ለአሽከርካሪው የሚላክ)' : 'Additional Instruction Note for Driver:'}
+              </label>
+              <textarea
+                rows={2}
+                value={customRejectNote}
+                onChange={(e) => setCustomRejectNote(e.target.value)}
+                placeholder={lang === 'am' ? 'እባክዎ መታወቂያዎን በብርሃን አንስተው ቅጹን በድጋሚ ይላኩ...' : 'e.g. Please retake photo with better lighting and resubmit the form...'}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            {/* Buttons */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSelectedRejectDriver(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                {lang === 'am' ? 'ተመለስ' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingDriverApproval}
+                onClick={() => handleRejectDriver(selectedRejectDriver.id)}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-600/25 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+                <span>{lang === 'am' ? 'ውድቅ ማድረጉን ላክ' : 'Send Rejection Notice'}</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );
