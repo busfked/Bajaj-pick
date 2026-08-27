@@ -2,6 +2,7 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 
 const SUPABASE_URL = 'https://jvggqpanmixyaaxdpazp.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_8tWYLvd3LPilxsVH7KWrdg_mc6G3x2h';
+const ADMIN_PASSWORD = '121921';
 
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
@@ -65,6 +66,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ status: 'ok', storage: 'supabase', time: now });
     }
 
+    if (path[0] === 'admin' && path[1] === 'verify-credentials' && method === 'POST') {
+      const { phone } = req.body || {};
+      if (phone && String(phone).trim() === ADMIN_PASSWORD) {
+        return res.json({ authenticated: true });
+      }
+      return res.status(401).json({ error: 'Access denied. Wrong password.' });
+    }
+
     if (path.length === 1 && path[0] === 'state' && method === 'GET') {
       const [drivers, trips, recharges, districts, settings] = await Promise.all([
         sb('drivers'), sb('trips'), sb('recharges'), sb('districts'), sb('settings'),
@@ -74,18 +83,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ drivers: drivers || [], trips: trips || [], recharges: recharges || [], districts: districts || [], settings: map });
     }
 
-    if (path[0] === 'admin' && path[1] === 'verify-credentials' && method === 'POST') {
-      const { email, phone } = req.body || {};
-      const rows = await sb('settings', 'GET', undefined, 'key=eq.admin_email');
-      if (rows && rows.length > 0 && rows[0].value.toLowerCase() === email.toLowerCase() && phone && String(phone).length >= 8) {
-        return res.json({ success: true, isAdmin: true });
+    if (path[0] === 'admin' && path[1] === 'settings') {
+      if (method === 'GET') {
+        const rows = await sb('settings');
+        const map: any = {};
+        (rows || []).forEach((s: any) => { map[s.key] = s.value; });
+        return res.json({ settings: map });
       }
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-
-        if (path[0] === 'admin' && path[1] === 'verify-credentials' && method === 'POST') {
-            return res.json({ authenticated: true });
-    }
       if (method === 'PUT') {
         const { settings } = req.body || {};
         if (!settings || typeof settings !== 'object') return res.status(400).json({ error: 'Settings object required' });
