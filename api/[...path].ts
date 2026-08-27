@@ -84,7 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
         if (path[0] === 'admin' && path[1] === 'verify-credentials' && method === 'POST') {
-      return res.json({ success: true, isAdmin: true });
+            return res.json({ authenticated: true });
     }
       if (method === 'PUT') {
         const { settings } = req.body || {};
