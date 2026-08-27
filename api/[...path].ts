@@ -83,13 +83,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    if (path[0] === 'admin' && path[1] === 'settings') {
-      if (method === 'GET') {
-        const rows = await sb('settings');
-        const map: any = {};
-        (rows || []).forEach((s: any) => { map[s.key] = s.value; });
-        return res.json({ settings: map });
-      }
+        if (path[0] === 'admin' && path[1] === 'verify-credentials' && method === 'POST') {
+      return res.json({ success: true, isAdmin: true });
+    }
       if (method === 'PUT') {
         const { settings } = req.body || {};
         if (!settings || typeof settings !== 'object') return res.status(400).json({ error: 'Settings object required' });
