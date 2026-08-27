@@ -77,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path[0] === 'admin' && path[1] === 'verify-credentials' && method === 'POST') {
       const { email, phone } = req.body || {};
       const rows = await sb('settings', 'GET', undefined, 'key=eq.admin_email');
-      if (rows && rows.length > 0 && rows[0].value === email && phone && String(phone).length >= 8) {
+      if (rows && rows.length > 0 && rows[0].value.toLowerCase() === email.toLowerCase() && phone && String(phone).length >= 8) {
         return res.json({ success: true, isAdmin: true });
       }
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
