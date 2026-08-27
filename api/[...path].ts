@@ -1,7 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 const SUPABASE_URL = 'https://jvggqpanmixyaaxdpazp.supabase.co';
-const SUPABASE_KEY = 'PASTE_YOUR_FULL_ANON_KEY_HERE';
+const SUPABASE_KEY = 'sb_publishable_8tWYLvd3LPilxsVH7KWrdg_mc6G3x2h';
 
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
