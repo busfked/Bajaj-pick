@@ -42,8 +42,17 @@ function calcDistance(lat1: number, lng1: number, lat2: number, lng2: number): n
 }
 
 function parsePath(req: VercelRequest): string[] {
-  const p = (req.query.path as string) || '';
-  return p.split('/').filter(Boolean);
+  let raw = '';
+  if (req.url) {
+    raw = req.url.split('?')[0];
+    raw = raw.replace(/^\/api\/?/, '');
+  }
+  if (!raw) {
+    let p = req.query.path;
+    if (Array.isArray(p)) p = p.join('/');
+    raw = String(p || '');
+  }
+  return raw.split('/').filter(Boolean);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
