@@ -665,7 +665,9 @@ export const DriverView: React.FC<DriverViewProps> = ({
               <span className="text-slate-400 block text-[10px] uppercase font-bold">
                 {lang === 'am' ? 'የጉዞ ርቀት' : 'Trip Distance'}
               </span>
-              <span className="font-bold text-slate-900 dark:text-white text-base block">{activeTrip.distanceKm.toFixed(1)} KM</span>
+              <span className="font-bold text-slate-900 dark:text-white text-base block">
+                {(activeTrip.distanceKm || 1.8).toFixed(1)} KM
+              </span>
               <span className="block text-[11px] text-slate-500">{activeTrip.districtName}</span>
             </div>
 
@@ -674,75 +676,100 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 {lang === 'am' ? 'የክፍያ ሂሳብ' : 'Fare Amount'}
               </span>
               <span className="font-bold text-emerald-600 dark:text-emerald-400 text-lg font-mono block">
-                {activeTrip.agreedFare || activeTrip.estimatedFare} Br
+                {activeTrip.agreedPrice || activeTrip.suggestedNegotiationMin || 40} Br
               </span>
               <span className="block text-[10px] text-slate-400">{lang === 'am' ? '100% የእርስዎ ገቢ' : '100% Driver Fare'}</span>
             </div>
           </div>
 
-          {/* Status Progression Workflow */}
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            {activeTrip.status === 'accepted' && (
+          {/* Quick Status Progression Tabs */}
+          <div className="space-y-3 pt-1">
+            <div className="flex flex-wrap items-center gap-2">
               <button
+                type="button"
                 onClick={() => onUpdateTripStatus(activeTrip.id, 'en_route')}
-                className="flex-1 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-2xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                  activeTrip.status === 'en_route'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-100 border border-blue-200 dark:border-blue-800'
+                }`}
               >
-                <Navigation className="w-4 h-4" />
-                <span>{lang === 'am' ? '1. ወደ ተሳፋሪው እየሄድኩ ነው (En Route)' : '1. Heading to Pickup Location →'}</span>
+                <Navigation className="w-3.5 h-3.5" />
+                <span>{lang === 'am' ? '1. ወደ ተሳፋሪው እየሄድኩ ነው' : '1. Heading to Pickup'}</span>
               </button>
-            )}
 
-            {activeTrip.status === 'en_route' && (
               <button
+                type="button"
                 onClick={() => onUpdateTripStatus(activeTrip.id, 'arrived')}
-                className="flex-1 py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm rounded-2xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                  activeTrip.status === 'arrived'
+                    ? 'bg-amber-500 text-white shadow-md'
+                    : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-200 dark:border-amber-800'
+                }`}
               >
-                <MapPin className="w-4 h-4" />
-                <span>{lang === 'am' ? '2. ተሳፋሪው በር ላይ ደርሻለሁ (Arrived)' : '2. Arrived at Passenger Doorstep'}</span>
+                <MapPin className="w-3.5 h-3.5" />
+                <span>{lang === 'am' ? '2. ተሳፋሪው በር ላይ ደርሻለሁ' : '2. Arrived at Doorstep'}</span>
               </button>
-            )}
 
-            {activeTrip.status === 'arrived' && (
-              <div className="flex-1 flex flex-col sm:flex-row items-center gap-3">
-                <div className="w-full sm:w-56 space-y-1">
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
-                    {lang === 'am' ? 'የተስማማችሁት ዋጋ (ብር)' : 'Agreed Fare (Br)'}
+              {onCancelTrip && (
+                <button
+                  type="button"
+                  id="btn-driver-cancel-trip"
+                  onClick={() => setIsDriverCancelModalOpen(true)}
+                  className="ml-auto px-3.5 py-2 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  title="Cancel and release this ride"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>{lang === 'am' ? 'ጉዞውን ሰርዝ' : 'Cancel Ride'}</span>
+                </button>
+              )}
+            </div>
+
+            {/* UNCONDITIONAL, PROMINENT COMPLETE TRIP ACTION CARD */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-teal-500/10 dark:from-emerald-950/40 dark:to-teal-950/40 border-2 border-emerald-500/30 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="w-full sm:w-auto flex-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="text-sm font-bold text-slate-900 dark:text-white">
+                    {lang === 'am' ? 'ጉዞውን አጠናቅቅ እና ሂሳብ ተቀበል' : 'Finish Trip & Collect Fare'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {lang === 'am'
+                    ? `ከባላንስዎ ${(activeTrip.distanceKm || 1.8).toFixed(1)} KM ይቀነሳል`
+                    : `Deducts ${(activeTrip.distanceKm || 1.8).toFixed(1)} KM from your mileage balance`}
+                </p>
+              </div>
+
+              <div className="w-full sm:w-auto flex flex-col sm:flex-row items-center gap-2.5 shrink-0">
+                <div className="w-full sm:w-36 space-y-0.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
+                    {lang === 'am' ? 'የተቀበሉት ብር' : 'Fare (Br)'}
                   </label>
                   <input
                     type="number"
-                    placeholder={String(activeTrip.estimatedFare)}
+                    placeholder={String(activeTrip.agreedPrice || activeTrip.suggestedNegotiationMin || 40)}
                     value={negotiatedPrice}
                     onChange={(e) => setNegotiatedPrice(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-mono font-bold"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-mono font-bold outline-hidden focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
 
                 <button
-                  onClick={() => {
-                    const price = negotiatedPrice ? parseFloat(negotiatedPrice) : activeTrip.estimatedFare;
-                    onUpdateTripStatus(activeTrip.id, 'completed', price);
+                  type="button"
+                  id="btn-driver-complete-trip"
+                  onClick={async () => {
+                    const price = negotiatedPrice ? parseFloat(negotiatedPrice) : (activeTrip.agreedPrice || activeTrip.suggestedNegotiationMin || 40);
+                    confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
+                    await onUpdateTripStatus(activeTrip.id, 'completed', price);
                   }}
-                  className="w-full sm:flex-1 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-sm rounded-2xl shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all"
+                  className="w-full sm:w-auto px-6 py-3 bg-emerald-500 hover:bg-emerald-600 active:scale-98 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all"
                 >
                   <CheckCircle2 className="w-5 h-5" />
-                  <span>{lang === 'am' ? '3. ጉዞው ተጠናቋል (ክፍያ ተቀብያለሁ)' : '3. Complete Trip & Collect Fare'}</span>
+                  <span>{lang === 'am' ? '✅ ጉዞው ተጠናቋል (ተቀብያለሁ)' : '✅ Complete Trip & Collect Fare'}</span>
                 </button>
               </div>
-            )}
-
-            {/* Driver Cancel / Release Trip Button */}
-            {onCancelTrip && (
-              <button
-                type="button"
-                id="btn-driver-cancel-trip"
-                onClick={() => setIsDriverCancelModalOpen(true)}
-                className="px-4 py-3.5 rounded-2xl border border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-                title="Cancel and release this ride"
-              >
-                <XCircle className="w-4 h-4" />
-                <span>{lang === 'am' ? 'ጉዞውን ሰርዝ' : 'Cancel Ride'}</span>
-              </button>
-            )}
+            </div>
           </div>
 
         </div>

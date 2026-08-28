@@ -11,7 +11,8 @@ import {
   calculateDistanceKm, 
   calculateEstimatedMinutes, 
   calculateNegotiationRange,
-  findClosestDistrict
+  findClosestDistrict,
+  resolveLocationFromText
 } from '../utils/geo';
 import { 
   Phone, 
@@ -76,23 +77,26 @@ export const PassengerView: React.FC<PassengerViewProps> = ({
   const [passengerPhone, setPassengerPhone] = useState('+251 91 555 7890');
   
   // Default pickup & dropoff
+  const initialDropoffIndex = districtLandmarks.length > 3 ? 3 : (districtLandmarks.length > 1 ? 1 : 0);
   const [pickupLandmarkId, setPickupLandmarkId] = useState<string>(districtLandmarks[0]?.id || '');
-  const [dropoffLandmarkId, setDropoffLandmarkId] = useState<string>(districtLandmarks[1]?.id || '');
+  const [dropoffLandmarkId, setDropoffLandmarkId] = useState<string>(districtLandmarks[initialDropoffIndex]?.id || '');
   
-  const [pickupAddress, setPickupAddress] = useState(districtLandmarks[0]?.name || 'Gerji Stand');
+  const [pickupAddress, setPickupAddress] = useState(districtLandmarks[0]?.name || 'Gerji Taxi & Bajaj Stand (Roba Bakery)');
   const [pickupCoords, setPickupCoords] = useState<LocationCoord>(
     districtLandmarks[0] 
       ? { lat: districtLandmarks[0].lat, lng: districtLandmarks[0].lng }
       : { lat: fallbackCenterLat, lng: fallbackCenterLng }
   );
   
-  const [dropoffAddress, setDropoffAddress] = useState(districtLandmarks[1]?.name || 'Unity University Gate');
+  const [dropoffAddress, setDropoffAddress] = useState(
+    districtLandmarks[initialDropoffIndex]?.name || 'Sunshine Real Estate Village Gate'
+  );
   const [dropoffCoords, setDropoffCoords] = useState<LocationCoord>(
-    districtLandmarks[1] 
-      ? { lat: districtLandmarks[1].lat, lng: districtLandmarks[1].lng }
+    districtLandmarks[initialDropoffIndex] 
+      ? { lat: districtLandmarks[initialDropoffIndex].lat, lng: districtLandmarks[initialDropoffIndex].lng }
       : {
-          lat: fallbackCenterLat + 0.005,
-          lng: fallbackCenterLng + 0.004,
+          lat: fallbackCenterLat + 0.012,
+          lng: fallbackCenterLng + 0.010,
         }
   );
 
@@ -818,14 +822,20 @@ export const PassengerView: React.FC<PassengerViewProps> = ({
                     type="text"
                     required
                     value={pickupAddress}
-                    onChange={(e) => setPickupAddress(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPickupAddress(val);
+                      const resolved = resolveLocationFromText(val, currentDistrict, false);
+                      setPickupCoords(resolved);
+                      setPickupLandmarkId('custom');
+                    }}
                     placeholder="Enter pickup address or landmark"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500"
                   />
 
                   {/* Preset Landmarks Chips */}
                   <div className="flex flex-wrap gap-1.5 pt-1">
-                    {districtLandmarks.slice(0, 3).map((lm) => (
+                    {districtLandmarks.slice(0, 4).map((lm) => (
                       <button
                         key={lm.id}
                         type="button"
@@ -853,27 +863,36 @@ export const PassengerView: React.FC<PassengerViewProps> = ({
                     type="text"
                     required
                     value={dropoffAddress}
-                    onChange={(e) => setDropoffAddress(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDropoffAddress(val);
+                      const resolved = resolveLocationFromText(val, currentDistrict, true);
+                      setDropoffCoords(resolved);
+                      setDropoffLandmarkId('custom');
+                    }}
                     placeholder="Enter destination in village"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500"
                   />
 
                   {/* Preset Dropoff Landmarks Chips */}
                   <div className="flex flex-wrap gap-1.5 pt-1">
-                    {districtLandmarks.slice(1, 4).map((lm) => (
-                      <button
-                        key={lm.id}
-                        type="button"
-                        onClick={() => handleSelectDropoffLandmark(lm.id)}
-                        className={`text-[10px] px-2.5 py-1 rounded-lg border font-bold transition-all cursor-pointer ${
-                          dropoffLandmarkId === lm.id
-                            ? 'bg-rose-50 dark:bg-rose-950 border-rose-500 text-rose-700 dark:text-rose-300'
-                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                        }`}
-                      >
-                        {lm.name}
-                      </button>
-                    ))}
+                    {districtLandmarks.map((lm) => {
+                      const dist = calculateDistanceKm(pickupCoords, lm);
+                      return (
+                        <button
+                          key={lm.id}
+                          type="button"
+                          onClick={() => handleSelectDropoffLandmark(lm.id)}
+                          className={`text-[10px] px-2.5 py-1 rounded-lg border font-bold transition-all cursor-pointer ${
+                            dropoffLandmarkId === lm.id
+                              ? 'bg-rose-50 dark:bg-rose-950 border-rose-500 text-rose-700 dark:text-rose-300'
+                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                          }`}
+                        >
+                          {lm.name} ({dist.toFixed(1)} KM)
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 

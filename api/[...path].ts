@@ -184,6 +184,16 @@ function mapDriver(row: any): any {
 
 // ---- Map Supabase trip row to frontend-expected format ----
 function mapTrip(row: any): any {
+  const pickup = { lat: row.pickup_lat || 0, lng: row.pickup_lng || 0 };
+  const dropoff = { lat: row.dropoff_lat || 0, lng: row.dropoff_lng || 0 };
+  let dist = row.distance_km || 0;
+  if (!dist && pickup.lat && dropoff.lat) {
+    dist = calculateDistanceKm(pickup, dropoff);
+  }
+  if (!dist) dist = 1.8;
+  const estMins = Math.max(2, Math.ceil((dist / 25) * 60 + 1));
+  const fare = row.fare || Math.round(40 + dist * 20);
+
   return {
     id: row.id,
     passengerName: row.customer_name || '',
@@ -191,16 +201,16 @@ function mapTrip(row: any): any {
     districtId: row.district || '',
     districtName: getDistrictName(row.district),
     pickupAddress: row.pickup_location || '',
-    pickupCoords: { lat: row.pickup_lat || 0, lng: row.pickup_lng || 0 },
+    pickupCoords: pickup,
     dropoffAddress: row.dropoff_location || '',
-    dropoffCoords: { lat: row.dropoff_lat || 0, lng: row.dropoff_lng || 0 },
-    distanceKm: 0,
-    estimatedMinutes: 0,
+    dropoffCoords: dropoff,
+    distanceKm: dist,
+    estimatedMinutes: estMins,
     passengerCount: 1,
     hasLuggage: false,
     tripType: 'instant_contract',
-    suggestedNegotiationMin: row.fare || 0,
-    suggestedNegotiationMax: row.fare || 0,
+    suggestedNegotiationMin: fare,
+    suggestedNegotiationMax: Math.round(fare * 1.25),
     currency: 'ETB (Birr)',
     status: row.status || 'pending',
     cancelledBy: '',
@@ -209,8 +219,8 @@ function mapTrip(row: any): any {
     ringingExpiresAt: row.created_at ? new Date(row.created_at).getTime() + 120000 : Date.now() + 120000,
     targetDriverIds: [],
     acceptedByDriverId: row.driver_id || '',
-    agreedPrice: row.fare || 0,
-    fare: row.fare || 0,
+    agreedPrice: row.fare || fare,
+    fare: row.fare || fare,
   };
 }
 
@@ -571,7 +581,27 @@ export default async function handler(req: VercelApiRequest | any, res: VercelAp
       if (status === 'completed') updates.completed_at = new Date().toISOString();
       const { data: trips } = await sb('trips', 'GET', undefined, `id=eq.${id}`);
       if (Array.isArray(trips) && trips.length > 0 && trips[0].driver_id) {
-        if (status === 'completed' || status === 'cancelled') {
+        if (status === 'completed') {
+          const tripDistance = trips[0].distance_km || (
+            trips[0].pickup_lat && trips[0].dropoff_lat
+              ? calculateDistanceKm(
+                  { lat: trips[0].pickup_lat, lng: trips[0].pickup_lng },
+                  { lat: trips[0].dropoff_lat, lng: trips[0].dropoff_lng }
+                )
+              : 1.8
+          );
+          const { data: driverRows } = await sb('drivers', 'GET', undefined, `id=eq.${trips[0].driver_id}`);
+          const curDriver = Array.isArray(driverRows) && driverRows[0];
+          const curKm = curDriver?.km_balance ?? 15;
+          const newKm = Math.max(0, Math.round((curKm - tripDistance) * 10) / 10);
+          const newTripsCount = (curDriver?.trips_completed || 0) + 1;
+          await sb('drivers', 'PATCH', { 
+            status: 'online', 
+            km_balance: newKm, 
+            trips_completed: newTripsCount,
+            updated_at: new Date().toISOString() 
+          }, `id=eq.${trips[0].driver_id}`);
+        } else if (status === 'cancelled') {
           await sb('drivers', 'PATCH', { status: 'online' }, `id=eq.${trips[0].driver_id}`);
         }
       }
