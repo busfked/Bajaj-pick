@@ -67,10 +67,13 @@ async function startServer() {
     res.json({ status: 'ok', time: new Date().toISOString() });
   });
 
-  // Get full current state
-  app.get('/api/state', (req, res) => {
+  // ✅ OPTIMIZED: Get only active trips (paginated)
+  app.get('/api/trips', (req, res) => {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(50, parseInt(req.query.limit as string) || 20);
+    const status = (req.query.status as string) || 'all';
+
     const now = Date.now();
-    // Check and expire stale ringing trips after ringTimeoutSeconds (120s)
     trips = trips.map(t => {
       if (t.status === 'ringing' && now > t.ringingExpiresAt) {
         return { ...t, status: 'expired' };
@@ -78,17 +81,98 @@ async function startServer() {
       return t;
     });
 
+    let filtered = trips;
+    if (status !== 'all') {
+      filtered = trips.filter(t => t.status === status);
+    }
+
+    const start = (page - 1) * limit;
+    const paginatedTrips = filtered.slice(start, start + limit);
+
+    res.json({
+      success: true,
+      trips: paginatedTrips,
+      total: filtered.length,
+      page,
+      limit,
+      hasMore: start + limit < filtered.length,
+    });
+  });
+
+  // ✅ OPTIMIZED: Get only active drivers (paginated)
+  app.get('/api/drivers', (req, res) => {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit as string) || 30);
+    const status = (req.query.status as string) || 'all';
+
+    let filtered = drivers;
+    if (status === 'online') {
+      filtered = drivers.filter(d => d.isOnline);
+    } else if (status === 'pending') {
+      filtered = drivers.filter(d => d.approvalStatus === 'pending');
+    } else if (status === 'approved') {
+      filtered = drivers.filter(d => d.approvalStatus === 'approved');
+    }
+
+    const start = (page - 1) * limit;
+    const paginatedDrivers = filtered.slice(start, start + limit);
+
+    res.json({
+      success: true,
+      drivers: paginatedDrivers,
+      total: filtered.length,
+      page,
+      limit,
+      hasMore: start + limit < filtered.length,
+    });
+  });
+
+  // ✅ OPTIMIZED: Get lightweight state summary (only counts & settings)
+  app.get('/api/state/summary', (req, res) => {
+    const now = Date.now();
+    const activeTripsCount = trips.filter(t => ['ringing', 'accepted', 'en_route', 'arrived'].includes(t.status)).length;
+    const onlineDriversCount = drivers.filter(d => d.isOnline && d.isRegistered).length;
+    const pendingDriversCount = drivers.filter(d => d.approvalStatus === 'pending').length;
+
+    res.json({
+      success: true,
+      settings: {
+        ...settings,
+        districts,
+      },
+      stats: {
+        onlineDrivers: onlineDriversCount,
+        totalDrivers: drivers.length,
+        pendingDrivers: pendingDriversCount,
+        activeTrips: activeTripsCount,
+        totalTrips: trips.length,
+        pendingRecharges: recharges.filter(r => r.status === 'pending').length,
+      },
+    });
+  });
+
+  // ✅ BACKWARD COMPATIBILITY: Legacy /api/state endpoint (now uses summary)
+  app.get('/api/state', (req, res) => {
+    const now = Date.now();
+    trips = trips.map(t => {
+      if (t.status === 'ringing' && now > t.ringingExpiresAt) {
+        return { ...t, status: 'expired' };
+      }
+      return t;
+    });
+
+    // Return only essential data for initial load
     res.json({
       settings: {
         ...settings,
         districts,
       },
       districts,
-      drivers,
-      trips,
-      recharges,
+      drivers: drivers.slice(0, 20), // Only first 20 drivers to reduce payload
+      trips: trips.slice(0, 20),
+      recharges: recharges.slice(0, 20),
       activeTrips: trips.filter(t => ['ringing', 'accepted', 'en_route', 'arrived'].includes(t.status)),
-      completedTrips: trips.filter(t => t.status === 'completed'),
+      completedTrips: trips.filter(t => t.status === 'completed').slice(0, 20),
     });
   });
 
@@ -168,9 +252,28 @@ async function startServer() {
 
   // --- MILEAGE RECHARGE SYSTEM (100 Birr = 15 KM) ---
 
-  // Get all recharge requests
+  // ✅ OPTIMIZED: Get recharges with pagination
   app.get('/api/recharges', (req, res) => {
-    res.json({ success: true, recharges });
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(50, parseInt(req.query.limit as string) || 20);
+    const status = (req.query.status as string) || 'all';
+
+    let filtered = recharges;
+    if (status !== 'all') {
+      filtered = recharges.filter(r => r.status === status);
+    }
+
+    const start = (page - 1) * limit;
+    const paginatedRecharges = filtered.slice(start, start + limit);
+
+    res.json({
+      success: true,
+      recharges: paginatedRecharges,
+      total: filtered.length,
+      page,
+      limit,
+      hasMore: start + limit < filtered.length,
+    });
   });
 
   // Driver submits recharge request with payment screenshot
@@ -284,7 +387,7 @@ async function startServer() {
     const adjustment = Number(amountKm) || 0;
     driver.kmBalance = Math.max(0, Math.round(((driver.kmBalance || 0) + adjustment) * 10) / 10);
     if (adjustment > 0) {
-      driver.totalKmPurchased = Math.round(((driver.totalKmPurchased || 0) + adjustment) * 10) / 10;
+      driver.totalKmPurchased = Math.round(((driver.totalKmPurchased || 0) + adjustment) * 10) / 10);
     }
 
     res.json({ success: true, driver, message: `Driver KM balance updated to ${driver.kmBalance} KM.` });
@@ -464,7 +567,7 @@ async function startServer() {
           // Deduct KM from driver's mileage credit balance
           const tripKm = trip.distanceKm || 1.5;
           driver.kmBalance = Math.max(0, Math.round(((driver.kmBalance || 0) - tripKm) * 10) / 10);
-          driver.totalKmDriven = Math.round(((driver.totalKmDriven || 0) + tripKm) * 10) / 10;
+          driver.totalKmDriven = Math.round(((driver.totalKmDriven || 0) + tripKm) * 10) / 10);
           
           driver.activeTripId = null;
         }
@@ -1015,4 +1118,3 @@ async function startServer() {
 }
 
 startServer();
-
