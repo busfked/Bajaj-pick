@@ -387,7 +387,7 @@ async function startServer() {
     const adjustment = Number(amountKm) || 0;
     driver.kmBalance = Math.max(0, Math.round(((driver.kmBalance || 0) + adjustment) * 10) / 10);
     if (adjustment > 0) {
-      driver.totalKmPurchased = Math.round(((driver.totalKmPurchased || 0) + adjustment) * 10) / 10);
+      driver.totalKmPurchased = Math.round(((driver.totalKmPurchased || 0) + adjustment) * 10) / 10;
     }
 
     res.json({ success: true, driver, message: `Driver KM balance updated to ${driver.kmBalance} KM.` });
