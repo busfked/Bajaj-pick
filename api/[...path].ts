@@ -262,6 +262,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ]);
       const drivers = (driversResult.ok && Array.isArray(driversResult.data)) ? driversResult.data.map(mapDriver) : [];
       const trips = (tripsResult.ok && Array.isArray(tripsResult.data)) ? tripsResult.data.map(mapTrip) : [];
+            // Auto-expire old ringing trips (older than 3 minutes)
+      const now = Date.now();
+      for (const trip of trips) {
+        if (trip.status === 'ringing' && now > trip.ringingExpiresAt) {
+          trip.status = 'expired';
+          sb('trips', 'PATCH', { status: 'expired' }, `id=eq.${trip.id}`);
+        }
+      }
+      trips = trips.filter(t => t.status !== 'expired');
       const recharges = (rechargesResult.ok && Array.isArray(rechargesResult.data)) ? rechargesResult.data : [];
       return res.json({ settings: settingsResult, drivers, trips, recharges });
     }
@@ -269,13 +278,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // POST /api/admin/verify-credentials
     if (method === 'POST' && pathname === '/api/admin/verify-credentials') {
       const { password, email, phone } = body;
-      if (password === ADMIN_PASSWORD) {
-        return res.json({ success: true, authenticated: true, message: 'Welcome back Admin!' });
-      }
-      return res.status(401).json({ success: false, error: 'Invalid password' });
-    }
-
-    // POST /api/admin/verify-password
+      if (password === ADMIN_PASSWORD || phone === ADMIN_PASSWORD || phone?.trim() === ADMIN_PASSWORD) {
+  return res.json({ success: true, authenticated: true, message: 'Welcome back Admin!' });
+}
+return res.status(401).json({ success: false, error: 'Invalid password' });    // POST /api/admin/verify-password
     if (method === 'POST' && pathname === '/api/admin/verify-password') {
       return res.json({ success: true, authenticated: true });
     }
