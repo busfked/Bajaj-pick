@@ -171,12 +171,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Settings State
   const [villageName, setVillageName] = useState(settings.villageName);
-  const [supportPhone, setSupportPhone] = useState(settings.supportPhone);
+  const [supportPhone, setSupportPhone] = useState(settings.supportPhone || '0991154337');
+  const [supportTelegram, setSupportTelegram] = useState(settings.supportTelegram || '@Loyalblack');
   const [supportEmail, setSupportEmail] = useState(settings.supportEmail || 'busfkedmurdu21@gmail.com');
-  const [adminPhone, setAdminPhone] = useState(settings.adminPhone || '0911234567');
-  const [telebirrAccount, setTelebirrAccount] = useState(settings.adminPaymentAccounts?.telebirr || '0911234567');
-  const [cbeAccount, setCbeAccount] = useState(settings.adminPaymentAccounts?.cbe || '1000123456789');
-  const [awashAccount, setAwashAccount] = useState(settings.adminPaymentAccounts?.awash || '0142345678900');
+  const [adminPhone, setAdminPhone] = useState(settings.adminPhone || '0991154337');
+  const [telebirrAccount, setTelebirrAccount] = useState(settings.adminPaymentAccounts?.telebirr || settings.telebirrAccount || '0991154337');
+  const [cbeAccount, setCbeAccount] = useState(settings.adminPaymentAccounts?.cbe || settings.cbeAccount || '1000123456789');
+  const [boaAccount, setBoaAccount] = useState(settings.adminPaymentAccounts?.boa || settings.boaAccount || '887654321');
   const [kmRateBirr, setKmRateBirr] = useState(settings.kmRateBirrPer15Km || 100);
   const [settingsSavedMsg, setSettingsSavedMsg] = useState(false);
 
@@ -427,13 +428,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     await onUpdateSettings({
       villageName,
       supportPhone,
+      supportTelegram,
       supportEmail,
       adminPhone,
       kmRateBirrPer15Km: Number(kmRateBirr),
+      telebirrAccount,
+      cbeAccount,
+      boaAccount,
       adminPaymentAccounts: {
         telebirr: telebirrAccount,
         cbe: cbeAccount,
-        awash: awashAccount,
+        boa: boaAccount,
+        awash: boaAccount,
       },
     });
     setSettingsSavedMsg(true);
@@ -1441,12 +1447,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  {lang === 'am' ? 'የአድሚን ስልክ ቁጥር' : 'Admin Phone Number'}
+                  {lang === 'am' ? 'የአስተባባሪ ስልክ ቁጥር' : 'Coordinator Support Phone'}
                 </label>
                 <input
                   type="tel"
-                  value={adminPhone}
-                  onChange={(e) => setAdminPhone(e.target.value)}
+                  value={supportPhone}
+                  onChange={(e) => setSupportPhone(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                  {lang === 'am' ? 'የቴሌግራም ዩዘርኔም (Telegram)' : 'Support Telegram Username'}
+                </label>
+                <input
+                  type="text"
+                  value={supportTelegram}
+                  onChange={(e) => setSupportTelegram(e.target.value)}
+                  placeholder="@Loyalblack"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  {lang === 'am' ? 'የአድሚን ኢሜይል' : 'Admin Email'}
+                </label>
+                <input
+                  type="email"
+                  value={supportEmail}
+                  onChange={(e) => setSupportEmail(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold"
                 />
               </div>
@@ -1478,13 +1509,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-blue-600 dark:text-blue-400">
-                  Awash Bank Account No.
+                <label className="text-xs font-bold text-amber-700 dark:text-amber-500">
+                  Bank of Abyssinia (BOA / አቢሲኒያ)
                 </label>
                 <input
                   type="text"
-                  value={awashAccount}
-                  onChange={(e) => setAwashAccount(e.target.value)}
+                  value={boaAccount}
+                  onChange={(e) => setBoaAccount(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold"
                 />
               </div>

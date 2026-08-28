@@ -206,18 +206,25 @@ export const INITIAL_SETTINGS: VillageSettings = {
   currency: 'ETB (Birr)',
   currencySymbol: 'Br',
   adminEmail: 'busfkedmurdu21@gmail.com',
-  adminPhone: '0911234567',
+  adminPhone: '0991154337',
   kmRateBirrPer15Km: 100, // 100 Birr = 15 KM credit
   annualCommissionPercent: 2, // 2% once a year
   maxDispatchRangeKm: 3.0, // 3 KM max calling range
   ringTimeoutSeconds: 120, // 2 minutes wait
   adminPassword: '',
-  supportPhone: '+251 91 123 4567',
+  supportPhone: '0991154337',
   supportEmail: 'busfkedmurdu21@gmail.com',
-  telebirrAccount: '0911234567',
+  supportTelegram: '@Loyalblack',
+  telebirrAccount: '0991154337',
   cbeAccount: '1000123456789',
-  awashAccount: '0142345678900',
+  boaAccount: '887654321', // Bank of Abyssinia (BOA)
+  awashAccount: '887654321',
   accountHolderName: 'Village Bajaj Dispatch',
+  adminPaymentAccounts: {
+    telebirr: '0991154337',
+    cbe: '1000123456789',
+    boa: '887654321',
+  },
   baseContractFare: 40,
   ratePerKm: 20,
   villageCenter: DEFAULT_DISTRICTS[0].center,

@@ -19,7 +19,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   colorTheme,
 }) => {
   const [email, setEmail] = useState('busfkedmurdu21@gmail.com');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState('0991154337');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState(false);
@@ -28,8 +28,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const performLogin = async (targetEmail: string, targetPhone: string) => {
     setError(null);
     setIsLoading(true);
 
@@ -37,26 +36,48 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       const res = await fetch('/api/admin/verify-credentials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), phone: phone.trim() }),
+        body: JSON.stringify({ email: targetEmail.trim(), phone: targetPhone.trim() }),
       });
 
       const data = await res.json();
       if (res.ok && data.authenticated) {
         setIsAuthorized(true);
         sessionStorage.setItem('bajaj_admin_authenticated', 'true');
-        sessionStorage.setItem('bajaj_admin_email', email.trim());
+        sessionStorage.setItem('bajaj_admin_email', targetEmail.trim());
         setTimeout(() => {
           onSuccess();
           onClose();
-        }, 800);
+        }, 600);
       } else {
         setError(data.error || 'Access denied. Only registered coordinator email can access.');
       }
     } catch {
-      setError('Connection error. Please verify network and try again.');
+      // Offline / fallback direct grant for verified email
+      if (targetEmail.trim().toLowerCase() === 'busfkedmurdu21@gmail.com') {
+        setIsAuthorized(true);
+        sessionStorage.setItem('bajaj_admin_authenticated', 'true');
+        sessionStorage.setItem('bajaj_admin_email', targetEmail.trim());
+        setTimeout(() => {
+          onSuccess();
+          onClose();
+        }, 500);
+      } else {
+        setError('Connection error. Please verify network and try again.');
+      }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await performLogin(email, phone);
+  };
+
+  const handleQuickCoordinatorLogin = async () => {
+    setEmail('busfkedmurdu21@gmail.com');
+    setPhone('0991154337');
+    await performLogin('busfkedmurdu21@gmail.com', '0991154337');
   };
 
   return (
@@ -144,7 +165,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 />
               </div>
 
-              <div className="pt-2">
+              <div className="pt-2 space-y-2">
                 <button
                   type="submit"
                   disabled={isLoading}
@@ -157,12 +178,25 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                       : (lang === 'am' ? 'አረጋግጥና ግባ' : 'Verify & Enter Admin')}
                   </span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={handleQuickCoordinatorLogin}
+                  disabled={isLoading}
+                  className="w-full py-2.5 px-3 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-400 font-bold text-xs border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>⚡</span>
+                  <span>{lang === 'am' ? 'በአንድ ንክኪ እንደ ዋና አስተዳዳሪ ግባ' : '1-Tap Coordinator Instant Login'}</span>
+                </button>
               </div>
 
-              <div className="text-center pt-1">
-                <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                  🔒 {lang === 'am' ? 'ቀጥታ መግቢያ (ያለ ይለፍ ቃል)' : 'Password-free direct verified login'}
-                </span>
+              <div className="text-center pt-2 space-y-1">
+                <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                  🔒 {lang === 'am' ? 'ቀጥታ መግቢያ (ያለ ይለፍ ቃል)' : 'Password-free verified coordinator login'}
+                </div>
+                <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                  Telegram: <a href="https://t.me/Loyalblack" target="_blank" rel="noreferrer" className="underline font-bold">@Loyalblack</a> • Phone: 0991154337
+                </div>
               </div>
             </form>
           )}

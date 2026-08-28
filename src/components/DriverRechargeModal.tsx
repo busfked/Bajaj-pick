@@ -9,10 +9,13 @@ import {
   X, 
   AlertCircle,
   FileImage,
-  Gauge
+  Gauge,
+  Phone,
+  Send
 } from 'lucide-react';
 import { VillageSettings, AppLanguage, ColorTheme, BajajDriver } from '../types';
 import { COLOR_THEMES } from '../utils/colors';
+import { compressImageFile } from '../utils/imageCompressor';
 
 interface DriverRechargeModalProps {
   isOpen: boolean;
@@ -37,6 +40,7 @@ export const DriverRechargeModal: React.FC<DriverRechargeModalProps> = ({
   const [screenshotUrl, setScreenshotUrl] = useState<string>('');
   const [transactionRef, setTransactionRef] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedAccount, setCopiedAccount] = useState<string | null>(null);
@@ -59,17 +63,20 @@ export const DriverRechargeModal: React.FC<DriverRechargeModalProps> = ({
     setTimeout(() => setCopiedAccount(null), 2000);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setScreenshotUrl(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    setIsCompressing(true);
+    setError(null);
+    try {
+      const compressed = await compressImageFile(file, { maxWidth: 900, maxHeight: 900, quality: 0.78 });
+      setScreenshotUrl(compressed);
+    } catch {
+      setError('Could not read image. Please choose another.');
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -111,6 +118,12 @@ export const DriverRechargeModal: React.FC<DriverRechargeModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  const telebirrAcc = settings.adminPaymentAccounts?.telebirr || settings.telebirrAccount || '0991154337';
+  const cbeAcc = settings.adminPaymentAccounts?.cbe || settings.cbeAccount || '1000123456789';
+  const boaAcc = settings.adminPaymentAccounts?.boa || settings.boaAccount || '887654321';
+  const supportPhone = settings.supportPhone || '0991154337';
+  const telegramHandle = (settings.supportTelegram || '@Loyalblack').replace('@', '');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto">
@@ -217,25 +230,25 @@ export const DriverRechargeModal: React.FC<DriverRechargeModalProps> = ({
                 </div>
               </div>
 
-              {/* 2. Admin Payment Accounts (Telebirr, CBE) */}
+              {/* 2. Admin Payment Accounts (Telebirr, CBE, BOA) */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                   <CreditCard className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>{lang === 'am' ? '2. በዚህ የክፍያ አካውንት ይላኩ (100 ብር = 15 KM)' : '2. Send Payment to Admin Accounts'}</span>
+                  <span>{lang === 'am' ? '2. በዚህ የክፍያ አካውንት ይላኩ (100 ብር = 15 KM)' : '2. Send Payment to Official Accounts'}</span>
                 </label>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                   {/* Telebirr */}
-                  <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                     <div>
                       <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold block">TELEBIRR</span>
-                      <span className="font-mono font-bold text-slate-900 dark:text-white">
-                        {settings.adminPaymentAccounts?.telebirr || '0911234567'}
+                      <span className="font-mono font-bold text-slate-900 dark:text-white text-xs">
+                        {telebirrAcc}
                       </span>
                     </div>
                     <button
                       type="button"
-                      onClick={() => handleCopy(settings.adminPaymentAccounts?.telebirr || '0911234567', 'telebirr')}
+                      onClick={() => handleCopy(telebirrAcc, 'telebirr')}
                       className="p-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
                       title="Copy Telebirr"
                     >
@@ -244,22 +257,57 @@ export const DriverRechargeModal: React.FC<DriverRechargeModalProps> = ({
                   </div>
 
                   {/* Commercial Bank of Ethiopia (CBE) */}
-                  <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                     <div>
                       <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold block">CBE (ንግድ ባንክ)</span>
                       <span className="font-mono font-bold text-slate-900 dark:text-white text-[11px]">
-                        {settings.adminPaymentAccounts?.cbe || '1000123456789'}
+                        {cbeAcc}
                       </span>
                     </div>
                     <button
                       type="button"
-                      onClick={() => handleCopy(settings.adminPaymentAccounts?.cbe || '1000123456789', 'cbe')}
+                      onClick={() => handleCopy(cbeAcc, 'cbe')}
                       className="p-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
                       title="Copy CBE Account"
                     >
                       {copiedAccount === 'cbe' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                     </button>
                   </div>
+
+                  {/* Bank of Abyssinia (BOA) */}
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-amber-700 dark:text-amber-400 font-bold block">BOA (አቢሲኒያ)</span>
+                      <span className="font-mono font-bold text-slate-900 dark:text-white text-[11px]">
+                        {boaAcc}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(boaAcc, 'boa')}
+                      className="p-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                      title="Copy BOA Account"
+                    >
+                      {copiedAccount === 'boa' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Support Contact */}
+                <div className="flex flex-wrap items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Support: <strong className="font-mono text-slate-900 dark:text-white">{supportPhone}</strong></span>
+                  </div>
+                  <a
+                    href={`https://t.me/${telegramHandle}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                  >
+                    <Send className="w-3 h-3" />
+                    <span>Telegram: @{telegramHandle}</span>
+                  </a>
                 </div>
               </div>
 
@@ -270,7 +318,7 @@ export const DriverRechargeModal: React.FC<DriverRechargeModalProps> = ({
                     <FileImage className="w-3.5 h-3.5 text-emerald-500" />
                     <span>{lang === 'am' ? '3. የክፍያ ስክሪንሽት ፎቶ ይጫኑ *' : '3. Attach Payment Screenshot Proof *'}</span>
                   </span>
-                  <span className="text-[10px] text-slate-400">Telebirr / CBE SMS</span>
+                  <span className="text-[10px] text-slate-400">Telebirr / CBE / BOA SMS</span>
                 </label>
 
                 <input
@@ -281,7 +329,12 @@ export const DriverRechargeModal: React.FC<DriverRechargeModalProps> = ({
                   className="hidden"
                 />
 
-                {screenshotUrl ? (
+                {isCompressing ? (
+                  <div className="p-4 rounded-2xl border border-dashed border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/40 flex items-center justify-center gap-2 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                    <div className="w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+                    <span>Processing & optimizing photo...</span>
+                  </div>
+                ) : screenshotUrl ? (
                   <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-900 aspect-16/9 flex items-center justify-center">
                     <img
                       src={screenshotUrl}
@@ -306,7 +359,7 @@ export const DriverRechargeModal: React.FC<DriverRechargeModalProps> = ({
                       {lang === 'am' ? 'የስክሪንሽት ፎቶውን እዚህ ይጫኑ' : 'Click to Upload Payment Screenshot'}
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      {lang === 'am' ? 'የቴሌብር ወይም የባንክ ደረሰኝ' : 'Telebirr SMS receipt / CBE transaction screenshot'}
+                      {lang === 'am' ? 'የቴሌብር፣ ንግድ ባንክ ወይም አቢሲኒያ ደረሰኝ' : 'Fast processing • Telebirr / CBE / BOA receipt'}
                     </span>
                   </div>
                 )}

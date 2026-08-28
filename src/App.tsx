@@ -500,6 +500,15 @@ export default function App() {
               <span className="font-medium text-[11px]">
                 {lang === 'am' ? 'ድጋፍ፡' : 'Support:'} {settings.supportPhone}
               </span>
+              <span className="text-slate-300 dark:text-slate-700">•</span>
+              <a
+                href={`https://t.me/${(settings.supportTelegram || '@Loyalblack').replace('@', '')}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline text-[11px]"
+              >
+                {settings.supportTelegram || '@Loyalblack'}
+              </a>
             </div>
 
             {/* Clearly Visible Admin Access Button at the Bottom */}

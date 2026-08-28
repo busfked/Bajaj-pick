@@ -17,6 +17,7 @@ export const TRANSLATIONS = {
     bookContratRide: 'Request a Contrat Bajaj',
     driverMode: 'Driver Mode',
     registerBajaj: 'Register Bajaj',
+    registerBajajBtn: '+ Register Your Bajaj Now',
     adminPanel: 'Admin Hub',
     
     // Theme & Language
@@ -156,6 +157,7 @@ export const TRANSLATIONS = {
     bookContratRide: 'የኮንትራት ባጃጅ ጥሪ',
     driverMode: 'የሾፌር ስክሪን',
     registerBajaj: 'ባጃጅ መዝግብ',
+    registerBajajBtn: '+ ባጃጅዎን አሁኑኑ ይመዝግቡ',
     adminPanel: 'አስተዳዳሪ',
 
     // Theme & Language

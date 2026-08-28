@@ -145,10 +145,18 @@ export interface VillageSettings {
   adminPassword?: string;
   supportPhone: string;
   supportEmail: string;
+  supportTelegram?: string; // @Loyalblack
   telebirrAccount: string;
   cbeAccount: string;
-  awashAccount: string;
+  boaAccount?: string; // Bank of Abyssinia (BOA)
+  awashAccount?: string; // Legacy fallback
   accountHolderName: string;
+  adminPaymentAccounts?: {
+    telebirr?: string;
+    cbe?: string;
+    boa?: string;
+    awash?: string;
+  };
   baseContractFare: number;
   ratePerKm: number;
   villageCenter: LocationCoord;
